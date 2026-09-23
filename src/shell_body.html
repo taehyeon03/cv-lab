@@ -1,0 +1,18 @@
+<div class="app">
+  <nav class="rail" id="rail" aria-label="단원 목록">
+    <div class="brand"><b>컴퓨터비전 실습실</b><span>2강 영상처리 · 3강 에지 검출</span><div class="slidebar" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
+  </nav>
+  <div>
+    <div class="mobile-nav"><select id="msel" aria-label="단원 선택"></select></div>
+    <main id="main"></main>
+  </div>
+</div>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$']] },
+  svg: { fontCache: 'global' },
+  options: { enableMenu: false },
+  startup: { ready() { MathJax.startup.defaultReady(); MathJax.startup.promise.then(() => window.UI && UI.flushMath()); } },
+};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js" async></script>
