@@ -132,7 +132,7 @@
         maskBox.replaceChildren(mkMask(my, 'm_y (작은 글씨: 겹친 f 값)', A.terms), mkMask(mx, 'm_x', B.terms));
         calcBox.replaceChildren(
           h('span', { class: 'mono' }, `d_y = ${expr(A) || '0'} = ${dy}`), h('span', { class: 'mono' }, `d_x = ${expr(B) || '0'} = ${dx}`),
-          h('span', { class: 'mono' }, `S(${y},${x}) = √(${dy}² + ${dx}²) = ${S.toFixed(2)}`),
+          h('span', { class: 'mono' }, `S(${y},${x}) = √((${dy})² + (${dx})²) = ${S.toFixed(2)}`),
           h('span', { class: 'mono' }, `D(${y},${x}) = arctan(${dy}/${dx}) = ${S ? gd.toFixed(1) + '°' : '정의 안 됨 (S=0)'}`),
           h('span', { class: 'mono', style: { color: 'var(--neg)' } }, S ? `에지 방향 = D + 90° = ${ed.toFixed(1)}° → 양자화 ${q}` : ''));
         const L = 1.6, gy = S ? dy / S : 0, gx = S ? dx / S : 0;
@@ -248,7 +248,8 @@
         if (n <= 9) {
           const amax = Math.max(...K.flat().map(Math.abs));
           const g = UI.GridView({ rows: n, cols: n, cs: n <= 7 ? 52 : 44, fs: 10.5, axes: false, cell: (y, x) => ({ t: K[y][x].toFixed(4), ...APP.signedCell(K[y][x], amax) }) }); g.draw();
-          kbox.replaceChildren(h('span', { class: 'caption' }, `${n}×${n} (6σ = ${(6 * sigma).toFixed(1)}), 합이 0이 되도록 평균을 뺌`), g.el);
+          kbox.replaceChildren(h('span', { class: 'caption' }, `${n}×${n} (6σ = ${(6 * sigma).toFixed(1)}), 식 (3.12)를 샘플링한 뒤 합이 0이 되도록 평균을 뺌`), g.el,
+            Math.abs(sigma - 0.5) < 0.05 ? h('div', { class: 'note warn' }, '교재 그림 3-13(a)의 σ=0.5 값은 모서리 0.4038, 옆 0.8021, 중심 −4.8233으로 위 값과 다릅니다. 식 (3.12)를 화소 중심에서 그대로 샘플링하면 이 값이 나오지 않으므로, 교재는 다른 이산화 방식을 쓴 것으로 보입니다(σ=1은 교재와 ±0.0002 이내로 일치). “영교차 검출 단계별” 페이지는 교재 값을 그대로 씁니다.') : null);
         } else {
           const iv = UI.ImageView({ caption: `${n}×${n} 커널 (색 = 부호)` }); iv.draw(K, 'signed'); iv.el.style.maxWidth = '260px';
           kbox.replaceChildren(iv.el);
