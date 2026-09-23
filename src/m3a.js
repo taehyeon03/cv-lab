@@ -174,6 +174,8 @@
       let sigma = 2;
       const cvA = h('canvas'), cvB = h('canvas'), cvK = h('canvas'), info = h('div', { class: 'col' });
       const cvMS = h('canvas', { style: { width: '100%', imageRendering: 'pixelated', borderRadius: '6px', border: '1px solid var(--rule)' } });
+      const scaleRow = h('div', { class: 'imgs' });
+      UI.onImage(() => draw());
       const G = (x, s) => Math.exp(-x * x / (2 * s * s)) / (Math.sqrt(2 * Math.PI) * s);
       function draw() {
         const xs = []; for (let x = -20; x <= 20; x += 0.1) xs.push(+x.toFixed(2));
@@ -184,27 +186,47 @@
         const k = CV.gaussian1D(sigma), n = k.length, r = (n - 1) / 2;
         UI.plot(cvK, { w: 420, h: 150, x: [-r - 0.5, r + 0.5], y: [0, Math.max(...k) * 1.15], xticks: n <= 21 ? [...Array(n).keys()].map(i => i - r) : undefined, series: [{ type: 'bar', data: k.map((v, i) => [i - r, v]), color: '--orange', frac: 0.7 }] });
         info.replaceChildren(h('span', { class: 'mono' }, `6σ = ${(6 * sigma).toFixed(1)} → 마스크 ${n}×${n}`), h('span', { class: 'caption' }, `예: σ=3.0이면 19×19 (교재). 이산 가중치는 합이 1이 되도록 정규화했습니다. 가운데 값 = ${k[r].toFixed(4)}`));
-        // multiscale bars (Fig 3-10)
-        const W = 240, base = new Array(W).fill(60);
+        // multiscale bars (Fig 3-10): 1-D signal, three pixels per sample, one row per σ
+        const W = 240, SX = 3, LM = 64, rowH = 26, gap = 4, base = new Array(W).fill(60);
         [[20, 22], [60, 64], [100, 130], [150, 151], [170, 176], [200, 214]].forEach(([a0, b0], i) => { for (let x = a0; x < b0; x++) base[x] = i % 2 ? 210 : 170; });
-        const ss = [0.5, 1, 2, 4, 8], rowH = 18, c = cvMS.getContext('2d'); cvMS.width = W * 2 + 10; cvMS.height = rowH * (ss.length + 1) + 6;
+        const ss = [0.5, 1, 2, 4, 8], secH = 22 + (rowH + gap) * (ss.length + 1), c = cvMS.getContext('2d');
+        cvMS.width = LM + W * SX + 8; cvMS.height = secH * 2 + 10;
         c.fillStyle = UI.tok('--surface'); c.fillRect(0, 0, cvMS.width, cvMS.height);
-        base.forEach((v, x) => { c.fillStyle = `rgb(${v},${v},${v})`; c.fillRect(x, 0, 1, rowH); c.fillRect(W + 10 + x, 0, 1, rowH); });
-        ss.forEach((s, i) => {
-          const kk = CV.gaussian1D(s), rr = (kk.length - 1) / 2, sm = base.map((_, x) => kk.reduce((a, w, j) => a + w * base[CV.clamp(x + j - rr, 0, W - 1)], 0));
-          const g1 = sm.map((v, x) => Math.abs((sm[CV.clamp(x + 1, 0, W - 1)] - sm[CV.clamp(x - 1, 0, W - 1)]) / 2)), g2 = sm.map((v, x) => sm[CV.clamp(x + 1, 0, W - 1)] + sm[CV.clamp(x - 1, 0, W - 1)] - 2 * v);
-          const m1 = Math.max(...g1) || 1, m2 = Math.max(...g2.map(Math.abs)) || 1;
-          g1.forEach((v, x) => { const t = Math.round(v / m1 * 255); c.fillStyle = `rgb(${t},${t},${t})`; c.fillRect(x, (i + 1) * rowH + 6, 1, rowH - 2); });
-          g2.forEach((v, x) => { const t = Math.round(128 + v / m2 * 127); c.fillStyle = `rgb(${t},${t},${t})`; c.fillRect(W + 10 + x, (i + 1) * rowH + 6, 1, rowH - 2); });
-          if (Math.abs(s - sigma) < 1e-9) { c.strokeStyle = UI.tok('--orange'); c.lineWidth = 2; c.strokeRect(1, (i + 1) * rowH + 5, cvMS.width - 2, rowH); }
+        c.font = '12px ' + UI.tok('--sans').split(',')[0]; c.textBaseline = 'middle';
+        const stripe = (arr, y0, map) => arr.forEach((v, x) => { const t = Math.max(0, Math.min(255, Math.round(map(v)))); c.fillStyle = `rgb(${t},${t},${t})`; c.fillRect(LM + x * SX, y0, SX, rowH); });
+        ['(b) 1차 미분 |f′| — 밝을수록 크다', '(c) 2차 미분 f″ — 회색 = 0, 흑백 경계 = 영교차'].forEach((title, sec) => {
+          const top = sec * (secH + 10);
+          c.fillStyle = UI.tok('--ink'); c.textAlign = 'left'; c.fillText(title, 4, top + 10);
+          c.fillStyle = UI.tok('--muted'); c.textAlign = 'right'; c.fillText('원래 영상', LM - 6, top + 22 + rowH / 2);
+          stripe(base, top + 22, v => v);
+          ss.forEach((s, i) => {
+            const kk = CV.gaussian1D(s), rr = (kk.length - 1) / 2, sm = base.map((_, x) => kk.reduce((a, w, j) => a + w * base[CV.clamp(x + j - rr, 0, W - 1)], 0));
+            const y0 = top + 22 + (i + 1) * (rowH + gap);
+            if (sec === 0) { const g1 = sm.map((v, x) => Math.abs((sm[CV.clamp(x + 1, 0, W - 1)] - sm[CV.clamp(x - 1, 0, W - 1)]) / 2)), m1 = Math.max(...g1) || 1; stripe(g1, y0, v => v / m1 * 255); }
+            else { const g2 = sm.map((v, x) => sm[CV.clamp(x + 1, 0, W - 1)] + sm[CV.clamp(x - 1, 0, W - 1)] - 2 * v), m2 = Math.max(...g2.map(Math.abs)) || 1; stripe(g2, y0, v => 128 + v / m2 * 127); }
+            const on = Math.abs(s - sigma) < 0.26 || (i === ss.length - 1 && sigma > 6) ;
+            c.fillStyle = UI.tok(on ? '--orange' : '--muted'); c.textAlign = 'right'; c.fillText('σ=' + s, LM - 6, y0 + rowH / 2);
+            if (on) { c.strokeStyle = UI.tok('--orange'); c.lineWidth = 2; c.strokeRect(LM - 1, y0 - 1, W * SX + 2, rowH + 2); }
+          });
         });
+        // image scale-space: blur and gradient magnitude at the current σ and neighbours
+        const g0 = UI.currentImage().gray;
+        scaleRow.replaceChildren(...[Math.max(0.5, sigma / 2), sigma, sigma * 2].map((s, k) => {
+          const bl = CV.gaussianBlur(g0, Math.min(s, 8)), E = CV.edgeMaps(bl, 'sobel');
+          const a1 = UI.ImageView({ caption: `스무딩 σ=${s.toFixed(1)}` + (k === 1 ? ' (지금)' : '') }), a2 = UI.ImageView({ caption: `|∇| σ=${s.toFixed(1)}` });
+          a1.draw(bl); a2.draw(E.S, 'abs');
+          return h('div', { class: 'col' }, a1.el, a2.el);
+        }));
       }
       const sl = UI.slider({ label: 'σ', min: 0.5, max: 8, step: 0.1, value: sigma, id: 'ga-s', fmt: v => v.toFixed(1), oninput: v => { sigma = v; draw(); } });
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, sl, h('div', { class: 'presets' }, [0.5, 1, 2, 4, 8].map(s => h('button', { class: 'btn', onclick: () => { sigma = s; sl.set(s); draw(); } }, 'σ=' + s))))),
         h('div', { class: 'row' }, h('div', { class: 'card', style: { flex: '1 1 380px' } }, h('h3', {}, 'σ에 따른 가우시안', h('small', {}, '그림 3-11(a)')), cvA), h('div', { class: 'card', style: { flex: '1 1 380px' } }, h('h3', {}, '가우시안의 미분', h('small', {}, '그림 3-11(b)')), cvB)),
-        h('div', { class: 'row' }, h('div', { class: 'card', style: { flex: '1 1 380px' } }, h('h3', {}, '이산 마스크'), cvK, info),
-          h('div', { class: 'card', style: { flex: '1 1 380px' } }, h('h3', {}, '다중 스케일 에지 효과', h('small', {}, '그림 3-10')), cvMS, h('p', { class: 'caption' }, '맨 위: 원래 영상(두 번 반복). 아래 다섯 줄: σ = 0.5, 1, 2, 4, 8. 왼쪽은 |1차 미분|, 오른쪽은 2차 미분(회색=0). 주황 테두리가 지금 σ. σ가 커질수록 가까운 두 에지가 하나로 합쳐집니다.')))));
+        h('div', { class: 'card' }, h('h3', {}, '이산 마스크'), cvK, info),
+        h('div', { class: 'card' }, h('h3', {}, '다중 스케일 에지 효과', h('small', {}, '그림 3-10 · 주황 테두리 = 지금 σ에 가장 가까운 줄')), h('div', { class: 'tablewrap' }, cvMS),
+          h('p', { class: 'caption' }, '원래 영상에는 폭이 다른 막대 여섯 개가 있습니다. σ가 작으면 막대마다 양쪽 에지가 따로 잡히지만, σ가 커질수록 좁은 막대(폭 1~4)의 두 에지가 하나로 뭉개지고 결국 넓은 막대(폭 30)의 에지만 남습니다 — “에지의 세밀함 조절”의 뜻입니다.')),
+        h('div', { class: 'card' }, h('h3', {}, '영상에서의 다중 스케일', h('small', {}, 'σ/2 · σ · 2σ')), h('div', { class: 'controls' }, UI.imagePicker()), h('div', { style: { marginTop: '8px' } }, scaleRow),
+          h('p', { class: 'caption' }, '아래 줄은 스무딩 후 소벨 강도입니다. σ가 커지면 잡음과 작은 무늬의 에지가 사라지고 큰 물체의 윤곽만 굵게 남습니다.'))));
       draw();
     },
   });
@@ -495,14 +517,31 @@
         lead: 'RGB 채널마다 에지를 구해 OR로 합치면 채널마다 에지 위치가 조금씩 어긋나 <b>불일치</b>가 생깁니다(그림 3-20). <b>디 젠조 방법</b>은 세 채널의 그레이디언트를 함께 써서 변화가 가장 큰 방향과 그 크기를 구합니다. “등휘도 컬러” 영상에서는 명암만 쓰면 색이 다른 경계가 거의 사라지는 것도 확인해 보세요. 영상 위에 마우스를 올리면 그 화소의 값이 나옵니다.',
         formulas: [[R`$$g_{yy}=d_{yr}^2+d_{yg}^2+d_{yb}^2,\;g_{xx}=d_{xr}^2+d_{xg}^2+d_{xb}^2,\;g_{yx}=d_{yr}d_{xr}+d_{yg}d_{xg}+d_{yb}d_{xb}$$`, '식 (3.13)'], [R`$$D=\tfrac12\arctan\!\left(\frac{2g_{yx}}{g_{xx}-g_{yy}}\right)$$`, '식 (3.14)'], [R`$$S=\sqrt{0.5\big((g_{yy}+g_{xx})+(g_{xx}-g_{yy})\cos 2D+2g_{yx}\sin 2D\big)}$$`, '식 (3.15)']],
       });
-      let frac = 0.2, Z = null;
+      let frac = 0.2, Z = null, sel = null;
+      const vec = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      vec.setAttribute('viewBox', '-120 -120 240 240'); vec.style.width = '240px'; vec.style.flex = '0 0 auto';
       const hov = (y, x) => {
         if (!Z) return;
-        const q = Z.at[y][x];
-        info.innerHTML = `(${y},${x}) g_yy=${q.gyy.toFixed(0)}, g_xx=${q.gxx.toFixed(0)}, g_yx=${q.gyx.toFixed(0)} → D=${(q.D * 180 / Math.PI).toFixed(1)}°, S=<b>${q.S.toFixed(1)}</b> · 명암 소벨 S=${Z.gS[y][x].toFixed(1)}`;
+        sel = [y, x];
+        const q = Z.at[y][x], E = Z.E;
+        const g = E.map(e => [e.dx[y][x], e.dy[y][x]]), zx = Math.cos(q.D) * q.S, zy = Math.sin(q.D) * q.S;
+        const sc = 95 / Math.max(1e-9, q.S, ...g.map(([a, b]) => Math.hypot(a, b)));
+        const ar = (dx, dy, col, w) => `<line x1="0" y1="0" x2="${dx * sc}" y2="${dy * sc}" stroke="${col}" stroke-width="${w}" stroke-linecap="round" marker-end="url(#ce-${col.replace(/[^a-z]/g, '')})"/>`;
+        const mk = ['#d33', '#2a2', '#36d', 'var(--ink)'].map(cl => `<marker id="ce-${cl.replace(/[^a-z]/g, '')}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${cl}"/></marker>`).join('');
+        vec.innerHTML = `<defs>${mk}</defs><circle r="100" fill="none" stroke="var(--rule)"/><line x1="-110" y1="0" x2="110" y2="0" stroke="var(--rule)"/><line x1="0" y1="-110" x2="0" y2="110" stroke="var(--rule)"/>` +
+          `<line x1="${-zx * sc}" y1="${-zy * sc}" x2="${zx * sc}" y2="${zy * sc}" stroke="var(--orange)" stroke-width="9" opacity="0.35" stroke-linecap="round"/>` +
+          ar(g[0][0], g[0][1], '#d33', 3) + ar(g[1][0], g[1][1], '#2a2', 3) + ar(g[2][0], g[2][1], '#36d', 3) +
+          `<text x="112" y="-6" font-size="11" text-anchor="end" fill="var(--muted)">x</text><text x="6" y="114" font-size="11" fill="var(--muted)">y</text>`;
+        info.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, vec, h('div', { class: 'col', style: { flex: '1 1 280px' } },
+          h('b', {}, `화소 (${y}, ${x})`),
+          h('span', { class: 'caption' }, '빨강·초록·파랑 화살표 = R, G, B 채널 각각의 그레이디언트 (d_x, d_y). 주황 굵은 막대 = 디 젠조가 고른 방향 D와 크기 S. 세 화살표가 서로 다른 쪽을 가리키면 OR 결합은 채널마다 다른 위치에 에지를 찍지만, 디 젠조는 세 채널을 합쳐 변화가 가장 큰 방향 하나를 고릅니다.'),
+          h('span', { class: 'mono' }, `g_yy=${q.gyy.toFixed(0)}, g_xx=${q.gxx.toFixed(0)}, g_yx=${q.gyx.toFixed(0)}`),
+          h('span', { class: 'mono' }, `D = ½·atan(2g_yx/(g_xx−g_yy)) = ${(q.D * 180 / Math.PI).toFixed(1)}°,  S = ${q.S.toFixed(1)}`),
+          h('span', { class: 'mono' }, `R/G/B 각 채널 S = ${E.map(e => e.S[y][x].toFixed(0)).join(' / ')} · 명암 소벨 S = ${Z.gS[y][x].toFixed(1)}`))));
+        Z.redraw([y, x]);
       };
-      const ivI = UI.ImageView({ caption: '입력', onHover: hov }), ivG = UI.ImageView({ caption: '명암 영상의 소벨 S', onHover: hov }), ivO = UI.ImageView({ caption: 'R/G/B 각각 이진화 후 OR (색 = 어느 채널)', onHover: hov }), ivZ = UI.ImageView({ caption: '디 젠조 S', onHover: hov }), ivA = UI.ImageView({ caption: 'RGB 채널 S의 평균', onHover: hov }), ivZb = UI.ImageView({ caption: '디 젠조 S 이진화', onHover: hov });
-      const info = h('div', { class: 'note' }, '영상 위에 마우스를 올려 보세요.');
+      const ivI = UI.ImageView({ caption: '입력 (클릭·이동하면 그 화소 분석)', onHover: hov }), ivG = UI.ImageView({ caption: '명암 영상의 소벨 S', onHover: hov }), ivO = UI.ImageView({ caption: 'R/G/B 각각 이진화 후 OR (색 = 어느 채널)', onHover: hov }), ivZ = UI.ImageView({ caption: '디 젠조 S', onHover: hov }), ivA = UI.ImageView({ caption: 'RGB 채널 S의 평균', onHover: hov }), ivZb = UI.ImageView({ caption: '디 젠조 S 이진화', onHover: hov });
+      const info = h('div', { class: 'card' });
       function run() {
         const img = UI.currentImage(), H = img.h, W = img.w;
         const ch = k => CV.gaussianBlur(img.rgb.map(r => r.map(p => p[k])), 1);
@@ -515,13 +554,27 @@
           const S = Math.sqrt(Math.max(0, 0.5 * ((gyy + gxx) + (gxx - gyy) * Math.cos(2 * D) + 2 * gyx * Math.sin(2 * D))));
           row.push({ gyy, gxx, gyx, D, S }); zS[y][x] = S; avg[y][x] = (E[0].S[y][x] + E[1].S[y][x] + E[2].S[y][x]) / 3;
         } at.push(row); }
-        Z = { at, gS };
         const mx = Math.max(...zS.flat()), T = mx * frac, chM = E.map(e => Math.max(...e.S.flat()));
-        ivI.draw(img.rgb, 'rgb'); ivG.draw(gS, 'abs', { amax: mx / Math.sqrt(3) }); ivZ.draw(zS, 'abs'); ivA.draw(avg, 'abs');
-        ivO.draw(E[0].S.map((r, y) => r.map((_, x) => E.map((e, k) => (e.S[y][x] > chM[k] * frac * 1.2 ? 255 : 0)))), 'rgb');
-        ivZb.draw(zS.map(r => r.map(v => (v > T ? 1 : 0))), 'binary');
+        const orImg = E[0].S.map((r, y) => r.map((_, x) => E.map((e, k) => (e.S[y][x] > chM[k] * frac * 1.2 ? 255 : 0))));
+        const redraw = p => {
+          const o = p ? { rects: [{ x: p[1] - 3, y: p[0] - 3, ww: 7, hh: 7, color: '--orange', w: 1 }] } : {};
+          ivI.draw(img.rgb, 'rgb', o); ivG.draw(gS, 'abs', { amax: mx / Math.sqrt(3), ...o }); ivZ.draw(zS, 'abs', o); ivA.draw(avg, 'abs', o);
+          ivO.draw(orImg, 'rgb', o); ivZb.draw(zS.map(r => r.map(v => (v > T ? 1 : 0))), 'binary', o);
+        };
+        Z = { at, gS, E, redraw };
+        // default: the pixel where the three channel gradients disagree most (strong edge, low alignment)
+        if (!sel || sel[0] >= H || sel[1] >= W) {
+          let best = -1;
+          for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+            const q = at[y][x]; if (q.S < mx * 0.3) continue;
+            const sumMag = E.reduce((s, e) => s + Math.hypot(e.dx[y][x], e.dy[y][x]), 0), score = sumMag - q.S;
+            if (score > best) { best = score; sel = [y, x]; }
+          }
+          if (!sel) sel = [H >> 1, W >> 1];
+        }
+        hov(...sel);
       }
-      UI.onImage(run);
+      UI.onImage(() => { sel = null; run(); });
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(), h('button', { class: 'btn', onclick: () => UI.setImage('iso') }, '등휘도 컬러로 보기'), UI.slider({ label: '임계 비율', min: 0.05, max: 0.6, step: 0.01, value: frac, id: 'ce-t', fmt: v => v.toFixed(2), oninput: v => { frac = v; run(); } })),
           h('div', { class: 'imgs', style: { marginTop: '10px' } }, ivI.el, ivG.el, ivO.el, ivZ.el, ivA.el, ivZb.el)), info,

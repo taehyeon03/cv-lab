@@ -78,6 +78,12 @@ const APP = (() => {
 
   function start() {
     nav();
+    const app = document.querySelector('.app');
+    let off = false; try { off = localStorage.getItem('cvlab-rail') === 'off'; } catch (e) {}
+    const tg = h('button', { class: 'btn rail-toggle', type: 'button' });
+    const setRail = v => { off = v; app.classList.toggle('rail-off', v); tg.textContent = v ? '☰ 목차 보이기' : '⇤ 목차 숨기기'; try { localStorage.setItem('cvlab-rail', v ? 'off' : 'on'); } catch (e) {} };
+    tg.addEventListener('click', () => setRail(!off));
+    document.body.append(tg); setRail(off);
     window.addEventListener('hashchange', route);
     route();
   }

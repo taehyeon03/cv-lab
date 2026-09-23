@@ -368,13 +368,23 @@
       });
       let kind = 'bin', op = 'dilate', f = APP.parseGrid(MORPH_BIN), seName = '1×3 가로', SE = SES[seName].map(r => r.slice()), frame = null;
       const CODE = ['function morph(f, S, op) {', '  for(j=0 to M-1) for(i=0 to N-1) {', '    if(op=팽창) g(j,i) = max{ f(j-y,i-x) | (y,x)∈S };  // 하나라도 1이면 1', '    else        g(j,i) = min{ f(j+y,i+x) | (y,x)∈S };  // 모두 1이어야 1', '  }', '  return g;', '}', '열기: g = morph(morph(f,S,침식), S,팽창);', '닫기: g = morph(morph(f,S,팽창), S,침식);'];
-      const st = UI.Stepper({ code: CODE, title: '모폴로지 의사 코드', render: fr => { frame = fr; gIn.draw(); gOut.draw(); gIn.overlay(fr.cells ? fr.cells.map(([y, x]) => ({ type: 'rect', pts: [y, x, 1, 1], color: '--orange', w: 2 })) : []); } });
+      const st = UI.Stepper({ code: CODE, title: '모폴로지 의사 코드', render: fr => {
+        frame = fr; gIn.draw(); gOut.draw();
+        gIn.overlay(fr.cells ? [...fr.cells.map(([y, x]) => ({ type: 'rect', pts: [y, x, 1, 1], color: '--orange', w: 3, fill: 'rgba(208,101,42,.28)' })), { type: 'dot', pts: [fr.j, fr.i], color: '--neg', r: 5 }] : []);
+        gOut.overlay(fr.j !== undefined ? [{ type: 'rect', pts: [fr.j, fr.i, 1, 1], color: '--neg', w: 3 }] : []);
+        if (fr.vals) {
+          const best = fr.word === 'max' ? Math.max(...fr.vals) : Math.min(...fr.vals); let marked = false;
+          valBox.replaceChildren(h('span', { class: 'caption' }, `S가 덮는 칸의 값 (${fr.word === 'max' ? '팽창 → 가장 큰 값' : '침식 → 가장 작은 값'})`),
+            h('div', { class: 'chips' }, fr.vals.map(v => { const hit = !marked && v === best; if (hit) marked = true; return h('span', { class: 'lit' + (hit ? ' t' : '') }, v); }), h('span', { class: 'mono' }, ` → ${fr.word} = ${best}`)),
+            h('span', { class: 'caption' }, fr.oob ? '영상 밖 칸은 ' + (fr.word === 'max' ? '무시' : '0으로 취급') + '합니다.' : ''));
+        }
+      } });
       const offs = () => { const hh = SE.length, ww = SE[0].length, oy = (hh - 1) >> 1, ox = (ww - 1) >> 1, o = []; SE.forEach((r, y) => r.forEach((v, x) => v && o.push({ y: y - oy, x: x - ox, v: 0 }))); return o; };
       const maxV = () => (kind === 'bin' ? 1 : 4);
       const cellOf = (g, y, x, cur, inCells) => { const v = g[y][x]; const s = kind === 'bin' ? { t: v, cls: v ? 'on' : '' } : { t: v, ...APP.grayCell(v, 4) }; if (cur) s.cls = (s.cls || '') + ' cur'; return s; };
       const gIn = UI.GridView({ rows: 8, cols: 8, cs: 34, label: '입력', cell: (y, x) => { const src = frame ? frame.src : f; return cellOf(src, y, x, false); }, onClick: (y, x, e) => { f[y][x] = (f[y][x] + (e.shiftKey ? maxV() : 1)) % (maxV() + 1); rebuild(); } });
       const gOut = UI.GridView({ rows: 8, cols: 8, cs: 34, label: '출력', cell: (y, x) => { if (!frame) return {}; if (y * 8 + x > frame.k) return { t: '' }; return cellOf(frame.out, y, x, frame.j === y && frame.i === x); } });
-      const seBox = h('div');
+      const seBox = h('div'), valBox = h('div', { class: 'col', style: { gap: '4px', marginTop: '10px' } });
       function drawSE() {
         const g = UI.GridView({ rows: SE.length, cols: SE[0].length, cs: 30, axes: false, cell: (y, x) => ({ t: SE[y][x] ? (kind === 'bin' ? 1 : 0) : '', cls: SE[y][x] ? 'on' : '', sub: y === (SE.length - 1) >> 1 && x === (SE[0].length - 1) >> 1 ? '●' : undefined }), onClick: (y, x) => { SE[y][x] = 1 - SE[y][x]; if (!SE.flat().some(Boolean)) SE[y][x] = 1; seName = ''; drawSE(); rebuild(); } });
         g.draw();
@@ -389,7 +399,7 @@
             const cells = o.map(s => (which === 'dilate' ? [j - s.y, i - s.x] : [j + s.y, i + s.x])).filter(([y, x]) => y >= 0 && x >= 0 && y < 8 && x < 8);
             const vals = o.map(s => { const y = which === 'dilate' ? j - s.y : j + s.y, x = which === 'dilate' ? i - s.x : i + s.x; return CV.inside(src, y, x) ? src[y][x] : which === 'dilate' ? null : 0; }).filter(v => v !== null);
             const word = which === 'dilate' ? 'max' : 'min';
-            fr.push({ src, out: part.map(r => r.slice()), k: j * 8 + i, j, i, cells, line: which === 'dilate' ? 3 : 4, vars: { j, i, 단계: phase, 'g(j,i)': out[j][i] },
+            fr.push({ src, vals, word: which === 'dilate' ? 'max' : 'min', oob: cells.length < o.length, out: part.map(r => r.slice()), k: j * 8 + i, j, i, cells, line: which === 'dilate' ? 3 : 4, vars: { j, i, 단계: phase, 'g(j,i)': out[j][i] },
               note: `${phase ? phase + ' · ' : ''}g(${j},${i}) = ${word}{ ${vals.join(', ')} } = <b>${out[j][i]}</b>` + (kind === 'bin' ? (which === 'dilate' ? (out[j][i] ? ' — 덮인 칸 중 1이 있음' : ' — 덮인 칸이 모두 0') : (out[j][i] ? ' — 덮인 칸이 모두 1' : ' — 0인 칸(또는 영상 밖)이 섞임')) : '') });
           }
           return out;
@@ -405,19 +415,37 @@
         }
         st.load(fr, 'end');
       }
+      // real-image demo: all four ops side by side
+      let iKind = 'bin', iSize = 1;
+      const ivs = ['원본', '팽창 f⊕S', '침식 f⊖S', '열기 f∘S', '닫기 f•S'].map(c => UI.ImageView({ caption: c }));
+      function imgDemo() {
+        const g = UI.currentImage().gray, T = CV.otsu(CV.histogram(g, 256)).T;
+        const src = iKind === 'bin' ? g.map(r => r.map(v => (v > T ? 1 : 0))) : g;
+        const o = []; for (let y = -iSize; y <= iSize; y++) for (let x = -iSize; x <= iSize; x++) o.push({ y, x, v: 0 });
+        const d = CV.morph(src, o, 'dilate'), e = CV.morph(src, o, 'erode');
+        const outs = [src, d, e, CV.morph(e, o, 'dilate'), CV.morph(d, o, 'erode')];
+        outs.forEach((a, k) => (iKind === 'bin' ? ivs[k].draw(a, 'binary', { dark: true }) : ivs[k].draw(a)));
+        ivs[0].setInfo(iKind === 'bin' ? `오츄 T=${T}로 이진화` : '');
+      }
+      UI.onImage(imgDemo);
+      const imgCard = h('div', { class: 'card' }, h('h3', {}, '실제 영상에서 네 연산 비교', h('small', {}, '정사각형 평편 구조요소')),
+        h('div', { class: 'controls' }, UI.imagePicker(), UI.segmented([['bin', '이진'], ['gray', '명암']], 'bin', v => { iKind = v; imgDemo(); }), UI.segmented([[1, '3×3'], [2, '5×5']], 1, v => { iSize = v; imgDemo(); })),
+        h('div', { class: 'imgs', style: { marginTop: '8px' } }, ivs.map(v => v.el)),
+        h('p', { class: 'caption' }, '팽창은 흰 영역을 키우고 침식은 줄입니다. 열기는 흰 잡점과 얇은 선(줄무늬 막대)을 없애고, 닫기는 검은 작은 구멍·틈을 메웁니다. 열기·닫기 후에도 큰 물체의 크기는 거의 그대로입니다.'));
       const kindSeg = UI.segmented([['bin', '이진 (예제 2-5)'], ['gray', '명암 (예제 2-6)']], kind, v => { kind = v; f = APP.parseGrid(v === 'bin' ? MORPH_BIN : MORPH_GRAY); seName = '1×3 가로'; SE = SES[seName].map(r => r.slice()); drawSE(); rebuild(); }, '종류');
       const opSeg = UI.segmented([['dilate', '팽창'], ['erode', '침식'], ['open', '열기'], ['close', '닫기']], op, v => { op = v; rebuild(); }, '연산');
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, kindSeg, opSeg),
             h('div', { class: 'row', style: { marginTop: '12px' } },
-              h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 (열기·닫기 2단계에서는 중간 결과) · 주황 테두리 = S가 덮는 칸'), gIn.el),
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 (열기·닫기 2단계에서는 중간 결과) · 주황 = S가 덮는 칸, 파란 점 = 지금 위치'), gIn.el),
               h('div', { class: 'col' }, h('span', { class: 'caption' }, '출력 g'), gOut.el),
-              h('div', { class: 'col' }, h('span', { class: 'caption' }, '구조 요소 S'), seBox))),
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '구조 요소 S'), seBox)), valBox),
           st.root,
+          imgCard,
           h('div', { class: 'note' }, '예제 2-5 분석: 가로 1×3 구조요소로 열기를 하면 폭이 1인 세로 막대(6열)가 사라지고, 닫기를 하면 3~4행의 틈(3~5열)이 메워집니다. 결과가 교재 그림 2-38과 같은지 확인해 보세요.')),
         h('div', { class: 'stack' }, st.panel)));
-      drawSE(); rebuild();
+      drawSE(); rebuild(); imgDemo();
     },
   });
 

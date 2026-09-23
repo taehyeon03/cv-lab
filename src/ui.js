@@ -65,7 +65,7 @@ const UI = (() => {
   }
   let activeStepper = null;
   window.addEventListener('keydown', e => {
-    if (!activeStepper || !activeStepper.root.isConnected || activeStepper.root.closest('[hidden]')) return;
+    if (!activeStepper || !activeStepper.panel.isConnected || activeStepper.panel.closest('[hidden]')) return;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) && document.activeElement.type !== 'range') return;
     if (e.key === 'ArrowRight') { activeStepper.go(activeStepper.i + 1); e.preventDefault(); }
     if (e.key === 'ArrowLeft') { activeStepper.go(activeStepper.i - 1); e.preventDefault(); }
@@ -94,8 +94,9 @@ const UI = (() => {
     const stackBox = h('div', { class: 'frames' });
     const stackWrap = h('div', { hidden: true }, h('div', { class: 'panel-title' }, '호출 스택 / 큐'), stackBox);
     const watchWrap = h('div', {}, h('div', { class: 'panel-title' }, '변수'), watch);
-    const panel = h('div', { class: 'card tutor' }, h('h3', {}, title), codeEl, watchWrap, stackWrap);
-    const root = h('div', { class: 'tutor' }, bar, note);
+    const panel = h('div', { class: 'card tutor tutor-panel' }, h('h3', {}, title), bar, note, codeEl, watchWrap, stackWrap);
+    // controls now live inside the panel; root stays as an empty placeholder for existing layouts
+    const root = h('div', { hidden: true });
     root.addEventListener('pointerdown', () => (activeStepper = S));
     panel.addEventListener('pointerdown', () => (activeStepper = S));
 
@@ -131,7 +132,7 @@ const UI = (() => {
     function play() {
       if (S.i >= S.frames.length - 1) go(0);
       playBtn.textContent = '❚❚'; playBtn.setAttribute('aria-label', '일시정지');
-      S.timer = setInterval(() => { if (S.i >= S.frames.length - 1 || !root.isConnected || root.closest('[hidden]')) return stop(); go(S.i + 1); }, +speed.value);
+      S.timer = setInterval(() => { if (S.i >= S.frames.length - 1 || !panel.isConnected || panel.closest('[hidden]')) return stop(); go(S.i + 1); }, +speed.value);
     }
     function stop() { clearInterval(S.timer); S.timer = null; playBtn.textContent = '▶'; playBtn.setAttribute('aria-label', '재생'); }
     function load(frames, at = 0) {
