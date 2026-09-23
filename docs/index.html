@@ -666,7 +666,7 @@ const UI = (() => {
     const range = h('input', { type: 'range', min: 0, max: 0, value: 0, 'aria-label': '단계' });
     const count = h('span', { class: 'count' }, '0 / 0');
     const playBtn = btn('▶', '재생', () => (S.timer ? stop() : play()));
-    const speed = h('select', { 'aria-label': '재생 속도' }, [['600', '느리게'], ['220', '보통'], ['60', '빠르게'], ['8', '매우 빠르게']].map(([v, t]) => h('option', { value: v }, t)));
+    const speed = h('select', { 'aria-label': '재생 속도' }, [['2500', '아주 느리게'], ['1400', '느리게'], ['700', '조금 느리게'], ['220', '보통'], ['60', '빠르게'], ['8', '매우 빠르게']].map(([v, t]) => h('option', { value: v }, t)));
     speed.value = '220';
     speed.addEventListener('change', () => { if (S.timer) { stop(); play(); } });
     range.addEventListener('input', () => { activeStepper = S; go(+range.value); });
