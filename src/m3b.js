@@ -72,7 +72,7 @@
     blurb: '화소 p를 지울지 말지를 네 개의 논리식으로 판단하는 과정을 이웃 n0~n7 값과 함께.',
     mount(root, m) {
       APP.scaffold(root, m, {
-        lead: '세선화는 두께 2~3인 에지를 두께 1로 깎되 <b>8-연결성을 끊지 않아야</b> 합니다. SPTA는 에지 화소 p의 여덟 이웃 n0~n7을 보고, p가 <b>경계(껍질)</b> 화소이면서 지워도 <b>끝점이 짧아지거나 연결이 끊기지 않을 때만</b> 지웁니다. 한 패스는 “껍질을 한 번 벗기는” 연산이고, 판단은 <b>원래 e</b>를 보고 결과는 e<sub>out</sub>에 씁니다(빨간 0 = 이번 패스에서 지워질 화소). 교재 식을 한 번에 모두 적용하면 두께 2인 선이 양쪽에서 동시에 지워져 사라지므로, 기본값은 동·남쪽 → 서·북쪽 두 단계로 나눠 적용합니다(“방식”에서 교재 그대로와 비교 가능). 격자에서 화소를 클릭하면 그 화소의 판단 단계로 바로 이동합니다.',
+        lead: '세선화는 두께 2~3인 에지를 두께 1로 깎되 <b>8-연결성을 끊지 않아야</b> 합니다. SPTA는 에지 화소 p의 여덟 이웃 n0~n7을 보고, p가 <b>경계(껍질)</b> 화소이면서 지워도 <b>끝점이 짧아지거나 연결이 끊기지 않을 때만</b> 지웁니다. 한 패스는 “껍질을 한 번 벗기는” 연산이고, 지우는 화소는 e<sub>out</sub>에서 0이 됩니다(빨간 0). 교재처럼 모든 화소를 원래 e로 동시에 판단하면 이웃한 두 화소가 함께 지워져 선이 끊길 수 있으므로, 기본값은 지운 화소를 <b>즉시 반영</b>하는 방식입니다(“방식”에서 교재 그대로와 비교 가능). 격자에서 화소를 클릭하면 그 화소의 판단 단계로 바로 이동합니다.',
         formulas: [[R`$$s_4=n_0\cdot(n_1+n_2+n_6+n_7)\cdot(n_2+n_3')\cdot(n_6+n_5')$$`, '그림 3-23 · n₄=0 그룹 (′ = NOT, + = OR, · = AND)']],
       });
       let base = fromArt(SPTA_PRESETS['두께 2~3 곡선']), e = base.map(r => r.slice()), pass = 1, frame = null, mode = 'inspect', hist = [];
@@ -108,29 +108,24 @@
         gv.draw();
       });
       const nbBox = h('div'), rulesBox = h('div', { class: 'stack', style: { gap: '8px' } }), passInfo = h('span', { class: 'pill hot' });
-      // 'two': east/south rules on e, then west/north rules on the result (keeps 2-thick lines);
-      // 'book': all four rules in one parallel scan exactly as printed (can erase 2-thick lines)
-      let algo = 'two';
+      // 'seq': same four rules, but each deletion is applied at once, so later pixels see it (keeps 8-connectivity);
+      // 'book': all four rules judged on the untouched e in one parallel scan, exactly as printed (can split lines)
+      let algo = 'seq';
       function rebuild(at = 0) {
-        const fr = [], del = CV.zeros(M, N);
-        const steps = algo === 'two' ? [['s0', 's2'], ['s4', 's6']] : [['s0', 's4', 's2', 's6']];
-        fr.push({ line: 1, base: e, del: CV.clone(del), note: `패스 ${pass}: e를 e_out에 복사합니다. ` + (algo === 'two' ? '이번 패스는 <b>1단계(동·남쪽 껍질: s0, s2)</b> → <b>2단계(서·북쪽 껍질: s4, s6)</b> 순서로 검사합니다. 2단계는 1단계에서 지운 결과를 보고 판단합니다.' : '교재 그대로 네 식을 한 번에, 모두 원래 e를 보고 판단합니다.'), vars: { 패스: pass } });
-        let cnt = 0, cur = e;
-        steps.forEach((keys, si) => {
-          const stepDel = CV.zeros(M, N), tag = algo === 'two' ? `${si + 1}단계(${keys.map(k => NAMES[+k[1]]).join('·')}) · ` : '';
-          for (let j = 1; j < M - 1; j++) for (let i = 1; i < N - 1; i++) {
-            if (cur[j][i] !== 1) continue;
-            const n = OFF.map(([a, b2]) => cur[j + a][i + b2]);
-            const G = evalGroups(n).map(g => ({ ...g, off: !keys.includes(g.key) }));
-            const win = G.find(g => g.val && !g.off);
-            if (win) { del[j][i] = 1; stepDel[j][i] = 1; cnt++; }
-            const lines = win ? [4, win.line, 9] : [4, ...G.filter(g => !g.off).map(g => g.line)];
-            fr.push({ cur: [j, i], n, G, base: cur, del: CV.clone(del), line: lines, vars: { 단계: algo === 'two' ? si + 1 : '-', j, i, ...Object.fromEntries(n.map((v, k) => ['n' + k, v])), s0: +G[0].val, s4: +G[1].val, s2: +G[2].val, s6: +G[3].val, '삭제': win ? '예' : '아니오' },
-              note: tag + (win ? `p=(${j},${i}): <b>${win.key}가 참</b> (${NAMES[win.b]}쪽 경계이고, 지워도 끝점·연결이 유지됨) → <b>e_out(${j},${i}) = 0</b>` : `p=(${j},${i}): 이번 단계의 식이 모두 거짓 → <b>유지</b>. ` + (G.every(g => !g.lits[0].val) ? '네 방향 모두 에지로 둘러싸인 안쪽 화소입니다.' : G.some(g => g.val && g.off) ? `(${G.filter(g => g.val && g.off).map(g => g.key).join(', ')}는 참이지만 다음 단계에서 검사합니다.)` : '경계이긴 하지만 지우면 끝점이 짧아지거나 연결이 끊깁니다.')) });
-          }
-          if (algo === 'two') { cur = cur.map((r, y) => r.map((v, x) => (stepDel[y][x] ? 0 : v))); if (si === 0) fr.push({ line: [], base: cur, del: CV.clone(del), note: `1단계 끝: ${cnt}개를 0으로 바꿨습니다. 이제 이 결과를 보고 2단계(서·북쪽 껍질)를 검사합니다.`, vars: { 패스: pass, '지운 화소': cnt } }); }
-        });
-        fr.push({ line: [], base: e, del: CV.clone(del), note: `패스 ${pass} 끝: <b>${cnt}개</b> 화소를 0으로 바꿉니다(빨간 0). ${cnt ? '“다음 패스”로 한 겹 더 벗기세요.' : '더 지울 화소가 없으므로 세선화가 끝났습니다.'}`, vars: { 패스: pass, '지운 화소': cnt } });
+        const fr = [], del = CV.zeros(M, N), cur = e.map(r => r.slice()), rd = algo === 'seq' ? cur : e;
+        fr.push({ line: 1, del: CV.clone(del), note: `패스 ${pass}: e를 e_out에 복사합니다. ` + (algo === 'seq' ? '이번 방식은 <b>지운 화소를 곧바로 e_out에 반영하고, 다음 화소는 e_out을 보고 판단</b>합니다. 그래서 이웃이 방금 지워졌다면 그 사실을 알고 판단합니다.' : '교재 그대로 모든 화소를 <b>원래 e</b>만 보고 동시에 판단합니다. 서로 “상대가 남을 것”이라 믿고 함께 지워져 선이 끊길 수 있습니다.'), vars: { 패스: pass } });
+        let cnt = 0;
+        for (let j = 1; j < M - 1; j++) for (let i = 1; i < N - 1; i++) {
+          if (rd[j][i] !== 1) continue;
+          const n = OFF.map(([a, b2]) => rd[j + a][i + b2]);
+          const G = evalGroups(n), win = G.find(g => g.val);
+          const gone = OFF.map(([a, b2], k) => (del[j + a] && del[j + a][i + b2] ? 'n' + k : null)).filter(Boolean);
+          if (win) { del[j][i] = 1; cur[j][i] = 0; cnt++; }
+          fr.push({ cur: [j, i], n, G, del: CV.clone(del), line: win ? [4, win.line, 9] : [4, 5, 6, 7, 8], vars: { j, i, ...Object.fromEntries(n.map((v, k) => ['n' + k, v])), s0: +G[0].val, s4: +G[1].val, s2: +G[2].val, s6: +G[3].val, '삭제': win ? '예' : '아니오' },
+            note: (gone.length ? `이웃 ${gone.join(', ')}은 이번 패스에서 이미 지워졌으므로 ` + (algo === 'seq' ? '0으로 보고 판단합니다. ' : '<b>하지만 원래 e를 보므로 여전히 1로 봅니다</b> — 끊김의 원인. ') : '') +
+              (win ? `p=(${j},${i}): <b>${win.key}가 참</b> (${NAMES[win.b]}쪽 경계이고, 지워도 끝점·연결이 유지됨) → <b>e_out(${j},${i}) = 0</b>` : `p=(${j},${i}): 네 식이 모두 거짓 → <b>유지</b>. ` + (G.every(g => !g.lits[0].val) ? '네 방향 모두 에지로 둘러싸인 안쪽 화소입니다.' : '경계이긴 하지만 지우면 끝점이 짧아지거나 연결이 끊깁니다.')) });
+        }
+        fr.push({ line: [], del: CV.clone(del), note: `패스 ${pass} 끝: <b>${cnt}개</b> 화소를 0으로 바꿉니다(빨간 0). ${cnt ? '“다음 패스”로 한 겹 더 벗기세요.' : '더 지울 화소가 없으므로 세선화가 끝났습니다.'}`, vars: { 패스: pass, '지운 화소': cnt } });
         passInfo.textContent = `패스 ${pass}`;
         st.load(fr, at);
       }
@@ -142,8 +137,8 @@
         const mini = UI.GridView({ rows: 3, cols: 3, cs: 50, fs: 16, axes: false, cell: (y, x) => { const k = LAB[y][x]; return k < 0 ? { t: 'p', cls: 'on cur' } : { t: n[k], sub: 'n' + k, cls: n[k] ? 'on' : '' }; } });
         mini.draw();
         nbBox.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, mini.el, h('div', { class: 'caption' }, 'n0=동, n1=남동, n2=남, n3=남서,', h('br'), 'n4=서, n5=북서, n6=북, n7=북동', h('br'), '(그림 3-23(b) 이웃 표기)')));
-        rulesBox.replaceChildren(...frame.G.map(g => h('div', { class: 'rule-card' + (g.off ? ' skip' : g.val ? ' win' : !g.lits[0].val ? ' skip' : '') },
-          h('h4', {}, h('span', { class: 'mono' }, g.key), h('span', {}, `n${g.b}=비에지 그룹 (${NAMES[g.b]}쪽 경계)`), h('span', { class: 'pill ' + (g.val ? 'ok' : 'bad') }, g.off ? (g.val ? '참 (다른 단계에서 검사)' : '거짓 (다른 단계)') : g.val ? '참 → 삭제' : '거짓')),
+        rulesBox.replaceChildren(...frame.G.map(g => h('div', { class: 'rule-card' + (g.val ? ' win' : !g.lits[0].val ? ' skip' : '') },
+          h('h4', {}, h('span', { class: 'mono' }, g.key), h('span', {}, `n${g.b}=비에지 그룹 (${NAMES[g.b]}쪽 경계)`), h('span', { class: 'pill ' + (g.val ? 'ok' : 'bad') }, g.val ? '참 → 삭제' : '거짓')),
           h('div', { class: 'chips' }, g.lits.map((l, k) => [k ? h('span', { class: 'mono', style: { color: 'var(--muted)' } }, '·') : null, h('span', { class: 'lit ' + (l.val ? 't' : 'f'), title: l.why }, l.txt)])),
           !g.lits[0].val ? h('div', { class: 'why' }, `n${g.b}=1이라 이 그룹은 해당 없음`) : h('ul', { class: 'why', style: { margin: 0, paddingLeft: '18px' } }, g.lits.filter(l => !l.val).map(l => h('li', {}, h('b', {}, l.txt + ' 거짓: '), l.why)).concat(g.val ? [h('li', {}, '모든 항이 참 → p는 지워도 되는 껍질 화소')] : [])))));
       }
@@ -152,8 +147,8 @@
         h('div', { class: 'stack' },
           h('div', { class: 'card' },
             h('div', { class: 'controls' }, modeSeg, h('div', { class: 'presets' }, Object.keys(SPTA_PRESETS).map(k => h('button', { class: 'btn', onclick: () => { base = fromArt(SPTA_PRESETS[k]); e = base.map(r => r.slice()); M = e.length; N = e[0].length; frame = null; gv.resize(M, N); pass = 1; hist = []; rebuild(); } }, k)))),
-            h('div', { class: 'controls', style: { marginTop: '8px' } }, UI.labeled('방식', UI.segmented([['two', '2단계 (연결 유지)'], ['book', '교재 그대로 한 번에']], algo, v => { algo = v; e = base.map(r => r.slice()); pass = 1; hist = []; rebuild(); })),
-              h('span', { class: 'caption', style: { flexBasis: '100%' } }, '“교재 그대로”는 네 식을 같은 원본으로 동시에 판단하므로, 두께 2인 선은 양쪽이 한꺼번에 지워져 사라집니다. 직사각형 프리셋 대신 두께 2 막대를 그려 비교해 보세요.'), passInfo,
+            h('div', { class: 'controls', style: { marginTop: '8px' } }, UI.labeled('방식', UI.segmented([['seq', '즉시 반영 (연결 유지)'], ['book', '교재 그대로 (원래 e로 동시 판단)']], algo, v => { algo = v; e = base.map(r => r.slice()); pass = 1; hist = []; rebuild(); })),
+              h('span', { class: 'caption', style: { flexBasis: '100%' } }, '“교재 그대로”는 모든 화소를 원래 e로 동시에 판단합니다. 이웃한 두 화소가 서로 “상대가 남는다”고 믿고 함께 지워지면 선이 끊기거나 두께 2인 선이 사라집니다. “즉시 반영”은 식은 같고, 지운 결과를 바로 다음 판단에 씁니다.'), passInfo,
               h('button', { class: 'btn primary', onclick: () => nextPass() }, '다음 패스 ▶'),
               h('button', { class: 'btn', onclick: () => { let k = 0; while (k++ < 30 && nextPass()); } }, '끝까지 반복'),
               h('button', { class: 'btn', onclick: () => { if (hist.length) { e = hist.pop(); pass--; rebuild(); } } }, '이전 패스'),
