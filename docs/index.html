@@ -49,6 +49,9 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+img { max-width: 100%; }
 html, body { background: var(--ground); color: var(--ink); }
 body { font-family: var(--sans); font-size: 15px; line-height: 1.6; }
 button, input, select { font: inherit; color: inherit; }
@@ -96,6 +99,9 @@ main { padding-block: 28px 80px; padding-inline: 36px; min-width: 0; }
 .lab { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
 .lab.wide-code { grid-template-columns: minmax(0, 1fr) 460px; }
 .stack { display: grid; gap: 16px; min-width: 0; }
+.lab > .stack:last-child { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto; }
+.lab > .stack:last-child .code { max-height: 46vh; }
+@media (max-width: 1100px) { .lab > .stack:last-child { position: static; max-height: none; overflow: visible; } }
 .row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .row > * { min-width: 0; }
 .col { display: grid; gap: 8px; }
@@ -869,7 +875,8 @@ const UI = (() => {
       c.strokeStyle = color; c.fillStyle = color; c.lineWidth = s.width || 2; c.globalAlpha = s.alpha || 1;
       if (s.type === 'bar') {
         const bw = s.bw || Math.max(1, (X(x0 + 1) - X(x0)) * (s.frac || .8));
-        for (const [x, y] of data) { const a = Y(Math.max(0, Math.min(y, y1))), b = Y(Math.max(y0, 0)); c.fillStyle = s.colorAt ? col(s.colorAt(x, y)) : color; c.fillRect(X(x) - bw / 2, Math.min(a, b), bw, Math.abs(b - a) || 0.5); }
+        const blo = Math.min(y0, y1), bhi = Math.max(y0, y1);
+        for (const [x, y] of data) { const a = Y(Math.max(blo, Math.min(y, bhi))), b = Y(Math.max(blo, Math.min(0, bhi))); c.fillStyle = s.colorAt ? col(s.colorAt(x, y)) : color; c.fillRect(X(x) - bw / 2, Math.min(a, b), bw, Math.abs(b - a) || 0.5); }
       } else if (s.type === 'points') {
         for (const [x, y] of data) { c.beginPath(); c.arc(X(x), Y(y), s.r || 3, 0, 7); c.fill(); }
       } else {
@@ -1127,6 +1134,8 @@ const APP = (() => {
       });
       const cvH = h('canvas'), cvC = h('canvas'), cvO = h('canvas');
       const tbl = h('div');
+      const mapSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      mapSvg.setAttribute('viewBox', '0 0 460 150'); mapSvg.style.width = '100%'; mapSvg.style.maxWidth = '560px';
       let E = CV.equalize(f, L);
       function rebuild() {
         E = CV.equalize(f, L);
@@ -1157,6 +1166,22 @@ const APP = (() => {
         if (ph === 4) for (let p = 0; p <= k; p++) ho[E.map[f[p >> 3][p & 7]]]++;
         UI.plot(cvO, { w: 300, h: 170, x: [-0.5, L - 0.5], y: [0, hmax], xticks: [...Array(L).keys()], series: [{ type: 'bar', data: ho, color: '--green' }] });
         const show = (p, l) => ph > p || (ph === p && l <= k);
+        {
+          const X = l => 30 + l * 57, hm = Math.max(...E.h, 1);
+          let s = `<text x="0" y="28" font-size="11" fill="var(--muted)">입력</text><text x="0" y="134" font-size="11" fill="var(--muted)">출력</text>`;
+          for (let l = 0; l < L; l++) {
+            const w = 3 + E.h[l] / hm * 30;
+            s += `<rect x="${X(l) - w / 2}" y="10" width="${w}" height="22" rx="3" fill="var(--ink)" opacity="${E.h[l] ? 0.85 : 0.12}"/><text x="${X(l)}" y="46" font-size="11" text-anchor="middle" fill="var(--muted)">${l}</text>`;
+            s += `<text x="${X(l)}" y="104" font-size="11" text-anchor="middle" fill="var(--muted)">${l}</text>`;
+          }
+          const ho2 = new Array(L).fill(0); E.h.forEach((c, l) => (ho2[E.map[l]] += c));
+          for (let l = 0; l < L; l++) if (show(3, l) && E.h[l]) {
+            const on = ph === 3 && l === k;
+            s += `<path d="M${X(l)},34 C${X(l)},70 ${X(E.map[l])},62 ${X(E.map[l])},94" fill="none" stroke="var(${on ? '--orange' : '--green'})" stroke-width="${1.5 + E.h[l] / hm * 5}" opacity="${on ? 1 : 0.7}"/>`;
+          }
+          if (ph >= 3) for (let l = 0; l < L; l++) { const c = ph === 3 ? E.h.reduce((a, v, i) => a + (i <= k && E.map[i] === l ? v : 0), 0) : ho2[l]; const w = 3 + c / hm * 30; s += `<rect x="${X(l) - w / 2}" y="110" width="${w}" height="22" rx="3" fill="var(--green)" opacity="${c ? 0.9 : 0.12}"/>`; }
+          mapSvg.innerHTML = s;
+        }
         tbl.replaceChildren(UI.dataTable(['l<sub>in</sub>', 'h(l)', 'ĥ(l)', 'c(l)', 'c(l)×7', 'l<sub>out</sub>'],
           E.h.map((v, l) => [l, ph === 0 ? hp[l] : v, show(1, l) ? E.hn[l] : '', show(2, l) ? E.c[l] : '', show(3, l) ? E.c[l] * 7 : '', show(3, l) ? E.map[l] : '']), frame.row));
       }
@@ -1181,7 +1206,8 @@ const APP = (() => {
             h('div', { class: 'controls', style: { marginTop: '8px' } }, h('button', { class: 'btn', onclick: () => { f = APP.parseGrid(EX21); rebuild(); } }, '예제 2-1로 되돌리기'), h('button', { class: 'btn', onclick: () => { const r = UI.rng(Date.now()); f = f.map(row => row.map(() => Math.min(7, Math.floor(r() * r() * 5)))); rebuild(); } }, '어두운 무작위 영상'))),
           st.root,
           h('div', { class: 'card' }, h('h3', {}, '매핑 표 T(·)', h('small', {}, '그림 2-9(a)')),
-            h('div', { class: 'row' }, tbl, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvC, h('span', { class: 'caption' }, '누적 c(l)×(L−1) 곡선이 곧 매핑 함수입니다')))),
+            h('div', { class: 'row' }, tbl, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvC, h('span', { class: 'caption' }, '누적 c(l)×(L−1) 곡선이 곧 매핑 함수입니다'))),
+            h('div', { style: { marginTop: '12px' } }, mapSvg, h('span', { class: 'caption' }, '각 명암값이 어디로 옮겨 가는지 — 막대 폭 = 화소 수. 많이 몰린 값(3, 4)은 서로 멀리 떨어지고, 드문 값(5, 6)은 7로 합쳐져 분포가 넓게 퍼집니다.'))),
           h('div', { class: 'card' }, h('h3', {}, '평활화된 영상', h('small', {}, '그림 2-9(b)(c)')),
             h('div', { class: 'row' }, gout.el, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvO, h('span', { class: 'caption' }, '새 히스토그램 — 동적 범위 [2,6] → [1,7]'))))),
         h('div', { class: 'stack' }, st.panel,
@@ -1217,6 +1243,7 @@ const APP = (() => {
       const st = UI.Stepper({ code: CODE, title: '오츄 의사 코드', render: fr => { frame = fr; draw(); } });
       const cvH = h('canvas'), cvV = h('canvas');
       const ivIn = UI.ImageView({ caption: '입력 영상' }), ivB = UI.ImageView({ caption: '현재 t로 이진화' });
+      const varBar = h('div', { class: 'col', style: { gap: '4px' } });
       function rebuild() {
         const g = UI.currentImage().gray;
         hist = CV.histogram(g, 256); O = CV.otsu(hist);
@@ -1232,7 +1259,21 @@ const APP = (() => {
       function draw() {
         const t = frame.t, g = UI.currentImage().gray;
         const mx = Math.max(...hist) * 0.7;
-        UI.plot(cvH, { w: 560, h: 170, x: [0, 255], y: [0, mx], series: [{ type: 'bar', data: hist, bw: 1.6, colorAt: x => (x <= t ? '--ink' : '--orange') }], vlines: [{ x: t, label: 't=' + t, color: '--green' }, { x: frame.best, label: 'T=' + frame.best, color: '--neg', dash: [4, 3] }] });
+        const rw = O.rows[t];
+        const pl = UI.plot(cvH, { w: 560, h: 190, x: [0, 255], y: [0, mx], series: [{ type: 'bar', data: hist, bw: 1.6, colorAt: x => (x <= t ? '--ink' : '--orange') }], vlines: [{ x: t, label: 't=' + t, color: '--green' }, { x: frame.best, label: 'T=' + frame.best, color: '--neg', dash: [4, 3] }] });
+        const cx = cvH.getContext('2d'), band = (m, v, col, lab) => {
+          if (!v && !m) return; const sd = Math.sqrt(v), y = pl.H - pl.m.b - 16;
+          cx.fillStyle = UI.col(col); cx.globalAlpha = 0.18; cx.fillRect(pl.X(Math.max(0, m - sd)), pl.m.t, pl.X(Math.min(255, m + sd)) - pl.X(Math.max(0, m - sd)), pl.H - pl.m.t - pl.m.b); cx.globalAlpha = 1;
+          cx.strokeStyle = UI.col(col); cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(pl.X(m - sd), y); cx.lineTo(pl.X(m + sd), y); cx.stroke();
+          cx.beginPath(); cx.arc(pl.X(m), y, 4.5, 0, 7); cx.fill();
+          cx.font = '11px ' + UI.tok('--mono').split(',')[0]; cx.textAlign = 'center'; cx.fillText(lab, pl.X(m), y - 8);
+        };
+        band(rw.m0, rw.v0, '--neg', 'μ₀±σ₀'); band(rw.m1, rw.v1, '--bad', 'μ₁±σ₁');
+        const tot = rw.w0 * rw.v0 + rw.w1 * rw.v1 || 1, vmx = Math.max(...O.rows.map(r => r.vw));
+        varBar.replaceChildren(
+          h('div', { class: 'caption' }, `v_within(${t}) = w₀v₀ + w₁v₁ = ${(rw.w0 * rw.v0).toFixed(0)} + ${(rw.w1 * rw.v1).toFixed(0)} = ${rw.vw.toFixed(0)}`),
+          h('div', { style: { display: 'flex', height: '18px', width: (rw.vw / vmx * 100) + '%', minWidth: '4px', borderRadius: '4px', overflow: 'hidden', transition: 'width .1s' } },
+            h('div', { style: { flex: String(rw.w0 * rw.v0 / tot), background: 'var(--neg)' } }), h('div', { style: { flex: String(rw.w1 * rw.v1 / tot), background: 'var(--bad)' } })));
         const vmax = Math.max(...O.rows.map(r => r.vw));
         UI.plot(cvV, { w: 560, h: 150, x: [0, 255], y: [0, vmax], series: [{ type: 'line', data: O.rows.slice(0, t + 1).map(r => [r.t, r.vw]), color: '--green' }], dots: [{ x: frame.best, y: O.rows[frame.best].vw, color: '--neg', label: 'min' }], yfmt: v => Math.round(v) });
         ivB.draw(g.map(r => r.map(v => (v > t ? 255 : 0))));
@@ -1242,7 +1283,8 @@ const APP = (() => {
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker()),
-            h('div', { style: { marginTop: '8px' } }, cvH, h('span', { class: 'caption' }, '히스토그램 — 검정: 흑 그룹 [0,t], 주황: 백 그룹 [t+1,255]')),
+            h('div', { style: { marginTop: '8px' } }, cvH, h('span', { class: 'caption' }, '히스토그램 — 검정: 흑 그룹 [0,t], 주황: 백 그룹 [t+1,255]. 파랑/빨강 띠: 각 그룹의 평균 μ ± 표준편차 σ — 띠가 좁을수록 그룹이 균일합니다.')),
+            h('div', { style: { marginTop: '8px' } }, varBar, h('span', { class: 'caption' }, '막대 길이 = v_within (짧을수록 좋음), 파랑 = 흑 그룹 몫 w₀v₀, 빨강 = 백 그룹 몫 w₁v₁')),
             h('div', { style: { marginTop: '8px' } }, cvV, h('span', { class: 'caption' }, 'v_within(t) — 골짜기의 바닥이 T'))),
           st.root,
           h('div', { class: 'imgs two' }, ivIn.el, ivB.el)),
@@ -1375,6 +1417,7 @@ const APP = (() => {
       const lab = h('div', { class: 'lab wide-code' });
       function rebuild() {
         if (algo === 'eff' && conn === 8) { conn = 4; connSeg.set(4); }
+        gIn.draw();
         const code = algo === 'rec' ? recCode(conn) : EFF_CODE;
         const prev = st;
         st = UI.Stepper({ code, title: algo === 'rec' ? `알고리즘 2-5 범람 채움 (${conn}-연결성)` : '알고리즘 2-6 범람 채움 (메모리 절약)', render: fr => { frame = fr; gL.draw(); } });
@@ -1621,24 +1664,27 @@ const APP = (() => {
       });
       let amt = 0.08, sigma = 1, r = 1, noisy;
       const ivN = UI.ImageView({ caption: '솔트페퍼 잡음', onHover: (y, x) => hov(y, x) }), ivG = UI.ImageView({ caption: '가우시안', onHover: (y, x) => hov(y, x) }), ivM = UI.ImageView({ caption: '메디안', onHover: (y, x) => hov(y, x) });
-      const box = h('div', { class: 'card' }, h('span', { class: 'caption' }, '영상 위에 마우스를 올리면 윈도우 값을 정렬해 보여 줍니다.'));
+      const box = h('div', { class: 'card' });
       let gOut, mOut;
-      function make() {
+      let make = function () {
         const g = UI.currentImage().gray, rr = UI.rng(11);
         noisy = g.map(row => row.map(v => { const q = rr(); return q < amt / 2 ? 0 : q < amt ? 255 : v; }));
         gOut = CV.gaussianBlur(noisy, sigma); mOut = CV.median(noisy, r);
         ivN.draw(noisy); ivG.draw(gOut); ivM.draw(mOut);
-      }
+      };
       function hov(y, x) {
         const a = [], Hh = noisy.length, W = noisy[0].length;
         for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) a.push(noisy[CV.clamp(y + j, 0, Hh - 1)][CV.clamp(x + i, 0, W - 1)]);
         const s = a.slice().sort((p, q) => p - q), mid = s.length >> 1, mean = a.reduce((p, q) => p + q, 0) / a.length;
-        box.replaceChildren(h('h3', {}, `(${y}, ${x}) 주변 ${2 * r + 1}×${2 * r + 1} 윈도우`),
+        const zoom = UI.GridView({ rows: 2 * r + 1, cols: 2 * r + 1, cs: 40, fs: 11, axes: false, cell: (j, i) => { const v = noisy[CV.clamp(y + j - r, 0, Hh - 1)][CV.clamp(x + i - r, 0, W - 1)]; return { t: v, ...APP.grayCell(v), cls: j === r && i === r ? 'cur' : '' }; } }); zoom.draw();
+        box.replaceChildren(h('h3', {}, `(${y}, ${x}) 주변 ${2 * r + 1}×${2 * r + 1} 윈도우`), h('div', { class: 'row', style: { alignItems: 'center' } }, zoom.el, h('div', { class: 'col', style: { flex: '1 1 300px' } }, h('span', { class: 'caption' }, '→ 값을 정렬하면'),
           h('div', { class: 'chips' }, s.map((v, k) => h('span', { class: 'lit' + (k === mid ? ' t' : v === 0 || v === 255 ? ' f' : '') }, v))),
-          h('p', { class: 'caption' }, h('b', {}, `메디안 = ${s[mid]}`), ` (정렬한 ${s.length}개 중 ${mid + 1}번째) · 단순 평균 = ${mean.toFixed(1)} · 가우시안 결과 = ${gOut[y][x].toFixed(1)} · 빨강: 잡음(0 또는 255)`));
+          h('p', { class: 'caption' }, h('b', {}, `메디안 = ${s[mid]}`), ` (정렬한 ${s.length}개 중 ${mid + 1}번째, 초록) · 단순 평균 = ${mean.toFixed(1)} · 가우시안 결과 = ${gOut[y][x].toFixed(1)} · 빨강: 잡음(0 또는 255)`), h('p', { class: 'caption' }, '잡음 값은 정렬하면 양 끝으로 밀려나 가운데 값에 영향을 못 줍니다. 평균·가우시안은 255 하나만 섞여도 값이 끌려갑니다.'))));
         [ivN, ivG, ivM].forEach((iv, k) => iv.draw([noisy, gOut, mOut][k], 'gray', { rects: [{ x: x - r, y: y - r, ww: 2 * r + 1, hh: 2 * r + 1 }] }));
       }
-      UI.onImage(make);
+      const pickDefault = () => { const g0 = UI.currentImage().gray; for (let y = 20; y < noisy.length - 20; y++) for (let x = 20; x < noisy[0].length - 20; x++) if (noisy[y][x] === 255 && g0[y][x] < 120) return [y, x]; return [noisy.length >> 1, noisy[0].length >> 1]; };
+      const make0 = make; make = () => { make0(); hov(...pickDefault()); };
+      UI.onImage(() => make());
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(),
           UI.slider({ label: '잡음 비율', min: 0, max: 0.3, step: 0.01, value: amt, id: 'md-amt', fmt: v => Math.round(v * 100) + '%', oninput: v => { amt = v; make(); } }),
@@ -1706,7 +1752,7 @@ const APP = (() => {
         }
         const holes = []; let nh = 0;
         for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) { const [yf, xf] = CV.M.apply([y, x, 1], Hi); if (hole[y][x] && yf >= 0 && xf >= 0 && yf <= Hh - 1 && xf <= W - 1) { holes.push({ y, x, color: '--orange' }); nh++; } }
-        ivF.draw(fw, 'gray', { marks: holes }); ivF.setInfo(`구멍 ${nh}개`); ivBn.draw(bn); ivBl.draw(bl);
+        ivF.draw(fw); ivF.setInfo(`구멍(검은 점) ${nh}개`); ivBn.draw(bn); ivBl.draw(bl);
       }
       UI.onImage(warp);
       // bilinear calculator
@@ -1743,7 +1789,7 @@ const APP = (() => {
         h('div', { class: 'card' }, h('h3', {}, '영상에 적용: 전방 vs 후방', h('small', {}, '그림 2-27')),
           h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: '회전 θ', min: -180, max: 180, value: ang, id: 'geo-ang', fmt: v => v + '°', oninput: v => { ang = v; warp(); } }), UI.slider({ label: '확대', min: 0.5, max: 3, step: 0.05, value: sc, id: 'geo-sc', fmt: v => v.toFixed(2), oninput: v => { sc = v; warp(); } })),
           h('div', { class: 'imgs', style: { marginTop: '10px' } }, ivF.el, ivBn.el, ivBl.el),
-          h('p', { class: 'caption' }, '전방 변환은 원본 화소를 보내는 방식이라, 확대하면 아무도 도착하지 않는 칸(주황 점 = 구멍)이 생깁니다. 후방 변환은 결과 화소마다 H⁻¹로 원본 위치를 찾아오므로 구멍이 없고, 실수 좌표를 보간하면 계단 현상(에일리어싱)도 줄어듭니다.')),
+          h('p', { class: 'caption' }, '전방 변환은 원본 화소를 보내는 방식이라, 확대하면 아무도 도착하지 않는 칸(검은 점 = 구멍)이 생깁니다. 후방 변환은 결과 화소마다 H⁻¹로 원본 위치를 찾아오므로 구멍이 없고, 실수 좌표를 보간하면 계단 현상(에일리어싱)도 줄어듭니다.')),
         h('div', { class: 'lab' },
           h('div', { class: 'card' }, h('h3', {}, '양선형 보간 계산기', h('small', {}, '빨간 점을 끌어 보세요')), h('div', { class: 'row' }, bsvg, h('div', { class: 'col', style: { flex: '1 1 240px' } }, h('div', { class: 'controls' }, ...binps.map((inp, k) => UI.labeled(['f(y,x)', 'f(y,x+1)', 'f(y+1,x)', 'f(y+1,x+1)'][k], inp))), bout))),
           h('div', { class: 'formula-card' }, h('div', { class: 'eq' }, R`$$f(y,x')=(1-\alpha)f(y,x)+\alpha f(y,x+1)$$`), h('div', { class: 'eq' }, R`$$f(y+1,x')=(1-\alpha)f(y+1,x)+\alpha f(y+1,x+1)$$`), h('div', { class: 'eq' }, R`$$f(y',x')=(1-\beta)f(y,x')+\beta f(y+1,x')$$`), h('div', { class: 'tag' }, '식 (2.18) — 가로로 두 번, 세로로 한 번 선형 보간')))));
@@ -2186,11 +2232,11 @@ const APP = (() => {
       const book = APP.parseGrid(ZC_BOOK);
       const CODE = ['σ 크기의 LOG 필터를 입력 영상 f에 적용한다.   // 결과 g', '결과 영상에서 영교차를 찾아 에지로 설정하고, 나머지는 비에지로 설정한다.', 'for(j=1 to M-2) for(i=1 to N-2) {', '  네 쌍(동-서, 남-북, 북동-남서, 북서-남동)의 부호를 조사한다.', '  부호가 다른 쌍의 값 차이가 T를 넘는지 확인한다.', '  if(그런 쌍이 두 개 이상) b(j,i)=1;  else b(j,i)=0;', '}'];
       const st = UI.Stepper({ code: CODE, title: '알고리즘 3-2 + 영교차 규칙', render: fr => { frame = fr; draw(); } });
-      const gF = UI.GridView({ rows: 8, cols: 8, cs: 32, label: '입력 f', cell: (y, x) => ({ t: f[y][x], color: f[y][x] ? '' : 'var(--faint)', cls: frame && frame.j !== undefined && Math.abs(frame.j - y) <= 1 && Math.abs(frame.i - x) <= 1 ? 'win' : '' }), onClick: (y, x, e) => { f[y][x] = (f[y][x] + (e.shiftKey ? 9 : 1)) % 10; rebuild(); } });
+      const gF = UI.GridView({ rows: 8, cols: 8, cs: 21, fs: 10, label: '입력 f', cell: (y, x) => ({ t: f[y][x], color: f[y][x] ? '' : 'var(--faint)', cls: frame && frame.j !== undefined && Math.abs(frame.j - y) <= 1 && Math.abs(frame.i - x) <= 1 ? 'win' : '' }), onClick: (y, x, e) => { f[y][x] = (f[y][x] + (e.shiftKey ? 9 : 1)) % 10; rebuild(); } });
       let gmax = 1;
-      const gG = UI.GridView({ rows: 8, cols: 8, cs: 58, fs: 11, label: 'LOG 결과 g', cell: (y, x) => { if (!g) return {}; const s = { t: g[y][x].toFixed(3), ...APP.signedCell(g[y][x], gmax) }; if (frame && frame.j === y && frame.i === x) s.cls = 'cur'; return s; } });
+      const gG = UI.GridView({ rows: 8, cols: 8, cs: 48, fs: 9.5, label: 'LOG 결과 g', cell: (y, x) => { if (!g) return {}; const s = { t: g[y][x].toFixed(3), ...APP.signedCell(g[y][x], gmax) }; if (frame && frame.j === y && frame.i === x) s.cls = 'cur'; return s; } });
       const gB = UI.GridView({
-        rows: 8, cols: 8, cs: 32, label: '영교차 b',
+        rows: 8, cols: 8, cs: 21, fs: 10, label: '영교차 b',
         cell: (y, x) => {
           if (!frame) return {};
           const done = frame.k !== undefined && (y - 1) * 6 + (x - 1) <= frame.k && y > 0 && x > 0 && y < 7 && x < 7;
@@ -2229,9 +2275,9 @@ const APP = (() => {
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, kSeg, sSl, UI.slider({ label: '임계값 T', min: 0, max: 8, step: 0.1, value: T, id: 'zc-t', fmt: v => v.toFixed(1), oninput: v => { T = v; rebuild(); } }), h('span', { class: 'ctl' }, cmpChk, h('label', { for: 'zc-cmp' }, '교재 그림 3-14(b)와 다른 칸 표시'))),
-            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f (클릭 +1)'), gF.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '영교차 b'), gB.el))),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, 'LOG 결과 g — 선: 지금 화소의 네 쌍 (초록 통과 · 빨강 차이 부족 · 회색 점선 부호 같음)'), gG.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f (클릭 +1)'), gF.el, h('span', { class: 'caption' }, '영교차 b'), gB.el))),
           st.root,
-          h('div', { class: 'card' }, h('h3', {}, 'LOG 결과 g와 네 쌍', h('small', {}, '그림 3-14(a) 오른쪽 숫자')), gG.el, h('div', { style: { marginTop: '8px' } }, pairBox))),
+          h('div', { class: 'card' }, h('h3', {}, '네 쌍 검사표'), pairBox)),
         h('div', { class: 'stack' }, st.panel)));
       rebuild();
     },
@@ -2336,7 +2382,16 @@ const APP = (() => {
         snap([], `완료. T_low는 넘지만 강한 에지와 이어지지 않은 화소 ${weak.length ? weak.join(', ') : '없음'}은 거짓 긍정으로 보고 버렸습니다.`);
         return fr;
       }
-      function drawG() { gv.draw(); }
+      function drawG() {
+        gv.draw();
+        if (frame.ph === 'nms' && frame.cur && frame.nb) {
+          const [y, x] = frame.cur, d = D0[y][x], ea = d * Math.PI / 4;
+          gv.overlay([
+            { type: 'line', pts: [y - Math.sin(ea) * 0.9, x - Math.cos(ea) * 0.9, y + Math.sin(ea) * 0.9, x + Math.cos(ea) * 0.9], color: '--neg', w: 3 },
+            ...frame.nb.map(([a, b]) => ({ type: 'arrow', pts: [y, x, y + (a - y) * 0.8, x + (b - x) * 0.8], color: '--bad', w: 2.5 })),
+          ]);
+        } else gv.overlay([]);
+      }
       const rebuildSmall = () => st.load(framesSmall(), frame ? Math.min(st.i, 1e9) : 0);
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(),
@@ -2352,7 +2407,7 @@ const APP = (() => {
               UI.slider({ label: 'T_low', min: 0, max: smax, value: gl, id: 'cn-gl', oninput: v => { gl = v; rebuildSmall(); } }),
               UI.slider({ label: 'T_high', min: 0, max: smax, value: gh, id: 'cn-gh', oninput: v => { gh = v; rebuildSmall(); } })),
               h('div', { style: { marginTop: '10px' } }, gv.el),
-              h('p', { class: 'caption' }, '주황 테두리: 지금 화소 · 파란 칸: 비교 대상 이웃 / 추적 단계에서 검은 칸 = e=1')),
+              h('p', { class: 'caption' }, '주황 테두리: 지금 화소 · 파란 선: 양자화된 에지 방향 · 빨간 화살표: 에지에 수직인 두 이웃(비교 대상) / 추적 단계에서 검은 칸 = e=1, 빨간 굵은 숫자 > T_high, 주황 숫자 > T_low')),
             st.root,
             h('div', { class: 'note warn' }, '두 가지 짚을 점 — ① 교재 8행은 S를 제자리에서 0으로 바꾸는데, 그러면 이미 억제된 위·왼쪽 이웃과 비교하게 됩니다. 여기서는 억제 전의 원래 S와 비교합니다. ② 교재 23행의 visited(y,x)=0은 visited(ny,nx)=0의 오타로 보고 이웃의 방문 여부를 검사합니다.')),
           h('div', { class: 'stack' }, st.panel))));
@@ -2625,12 +2680,20 @@ const APP = (() => {
         const [y, x] = sel;
         if (!e[y][x]) { insBox.replaceChildren(h('span', { class: 'caption' }, `(${y},${x})는 에지 화소가 아닙니다. 에지 화소를 클릭해 보세요.`)); return; }
         const { n, c } = CV.transitions(e, y, x), LAB = [[5, 6, 7], [4, -1, 0], [3, 2, 1]];
-        const mini = UI.GridView({ rows: 3, cols: 3, cs: 46, fs: 15, axes: false, cell: (j, i) => { const k = LAB[j][i]; if (k < 0) return { t: 'p', cls: 'cur' }; const hit = n[(k + 7) % 8] === 0 && n[k] === 1; return { t: n[k], sub: 'n' + k, cls: n[k] ? 'on' : '', badge: hit ? '0→1' : undefined, badgeColor: 'var(--orange)' }; } });
-        mini.draw();
-        const ring = [0, 1, 2, 3, 4, 5, 6, 7].map(k => { const p = [[1, 2], [2, 2], [2, 1], [2, 0], [1, 0], [0, 0], [0, 1], [0, 2]][k]; return p; });
-        mini.overlay(ring.map((p, k) => { const q = ring[(k + 1) % 8]; const hit = n[k] === 0 && n[(k + 1) % 8] === 1; return { type: 'arrow', pts: [p[0], p[1], q[0], q[1]], color: hit ? '--orange' : '--faint', w: hit ? 3 : 1.2, op: hit ? 1 : 0.6 }; }));
+        const mini = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        mini.setAttribute('viewBox', '-110 -110 220 220'); mini.style.width = '210px';
+        const P = k => [Math.cos(k * Math.PI / 4) * 70, Math.sin(k * Math.PI / 4) * 70];
+        let sv = `<defs><marker id="trk-ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--orange)"/></marker></defs>`;
+        for (let k = 0; k < 8; k++) {
+          const a = (k * 45 + 8) * Math.PI / 180, b = ((k + 1) * 45 - 8) * Math.PI / 180, hit = n[k] === 0 && n[(k + 1) % 8] === 1;
+          sv += `<path d="M${Math.cos(a) * 70},${Math.sin(a) * 70} A70,70 0 0 1 ${Math.cos(b) * 70},${Math.sin(b) * 70}" fill="none" stroke="var(${hit ? '--orange' : '--rule'})" stroke-width="${hit ? 4 : 2}" ${hit ? 'marker-end="url(#trk-ar)"' : ''}/>`;
+          if (hit) { const m = (k * 45 + 22.5) * Math.PI / 180; sv += `<text x="${Math.cos(m) * 98}" y="${Math.sin(m) * 98 + 4}" font-size="11" text-anchor="middle" fill="var(--orange)" font-weight="700">0→1</text>`; }
+        }
+        for (let k = 0; k < 8; k++) { const [x, y] = P(k); sv += `<circle cx="${x}" cy="${y}" r="15" fill="var(${n[k] ? '--cell-on' : '--cell-bg'})" stroke="var(--ink)"/><text x="${x}" y="${y + 4}" font-size="12" text-anchor="middle" fill="var(${n[k] ? '--cell-on-ink' : '--ink'})">n${k}</text>`; }
+        sv += `<circle r="17" fill="var(--orange)"/><text y="5" font-size="14" text-anchor="middle" fill="#fff" font-weight="700">p</text>`;
+        mini.innerHTML = sv;
         const kind = c === 1 ? '끝점 (@)' : c === 2 ? '통과점 (o)' : c >= 3 ? '분기점 (+)' : '고립점';
-        insBox.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, mini.el, h('div', { class: 'col' },
+        insBox.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, mini, h('div', { class: 'col', style: { flex: '1 1 260px' } },
           h('span', { class: 'mono' }, `(${y},${x}) 이웃 n0…n7 = ${n.join(' ')}`), h('span', {}, `n0→n1→…→n7→n0 순서로 한 바퀴 돌며 0 다음에 1이 오는 곳을 세면 `, h('b', {}, `c = ${c}`), ` → `, h('b', { style: { color: 'var(--orange)' } }, kind)),
           h('span', { class: 'caption' }, '이웃 화소의 개수가 아니라 “덩어리” 개수를 세는 셈입니다. 이웃 3개가 붙어 있으면(ㄱ자) 한 덩어리라 c=1 또는 2가 되어 분기점이 아닙니다 — 그림 3-25의 a, c가 그런 경우입니다.'))));
       }

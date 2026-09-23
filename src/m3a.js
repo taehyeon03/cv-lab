@@ -272,11 +272,11 @@
       const book = APP.parseGrid(ZC_BOOK);
       const CODE = ['σ 크기의 LOG 필터를 입력 영상 f에 적용한다.   // 결과 g', '결과 영상에서 영교차를 찾아 에지로 설정하고, 나머지는 비에지로 설정한다.', 'for(j=1 to M-2) for(i=1 to N-2) {', '  네 쌍(동-서, 남-북, 북동-남서, 북서-남동)의 부호를 조사한다.', '  부호가 다른 쌍의 값 차이가 T를 넘는지 확인한다.', '  if(그런 쌍이 두 개 이상) b(j,i)=1;  else b(j,i)=0;', '}'];
       const st = UI.Stepper({ code: CODE, title: '알고리즘 3-2 + 영교차 규칙', render: fr => { frame = fr; draw(); } });
-      const gF = UI.GridView({ rows: 8, cols: 8, cs: 32, label: '입력 f', cell: (y, x) => ({ t: f[y][x], color: f[y][x] ? '' : 'var(--faint)', cls: frame && frame.j !== undefined && Math.abs(frame.j - y) <= 1 && Math.abs(frame.i - x) <= 1 ? 'win' : '' }), onClick: (y, x, e) => { f[y][x] = (f[y][x] + (e.shiftKey ? 9 : 1)) % 10; rebuild(); } });
+      const gF = UI.GridView({ rows: 8, cols: 8, cs: 21, fs: 10, label: '입력 f', cell: (y, x) => ({ t: f[y][x], color: f[y][x] ? '' : 'var(--faint)', cls: frame && frame.j !== undefined && Math.abs(frame.j - y) <= 1 && Math.abs(frame.i - x) <= 1 ? 'win' : '' }), onClick: (y, x, e) => { f[y][x] = (f[y][x] + (e.shiftKey ? 9 : 1)) % 10; rebuild(); } });
       let gmax = 1;
-      const gG = UI.GridView({ rows: 8, cols: 8, cs: 58, fs: 11, label: 'LOG 결과 g', cell: (y, x) => { if (!g) return {}; const s = { t: g[y][x].toFixed(3), ...APP.signedCell(g[y][x], gmax) }; if (frame && frame.j === y && frame.i === x) s.cls = 'cur'; return s; } });
+      const gG = UI.GridView({ rows: 8, cols: 8, cs: 48, fs: 9.5, label: 'LOG 결과 g', cell: (y, x) => { if (!g) return {}; const s = { t: g[y][x].toFixed(3), ...APP.signedCell(g[y][x], gmax) }; if (frame && frame.j === y && frame.i === x) s.cls = 'cur'; return s; } });
       const gB = UI.GridView({
-        rows: 8, cols: 8, cs: 32, label: '영교차 b',
+        rows: 8, cols: 8, cs: 21, fs: 10, label: '영교차 b',
         cell: (y, x) => {
           if (!frame) return {};
           const done = frame.k !== undefined && (y - 1) * 6 + (x - 1) <= frame.k && y > 0 && x > 0 && y < 7 && x < 7;
@@ -315,9 +315,9 @@
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, kSeg, sSl, UI.slider({ label: '임계값 T', min: 0, max: 8, step: 0.1, value: T, id: 'zc-t', fmt: v => v.toFixed(1), oninput: v => { T = v; rebuild(); } }), h('span', { class: 'ctl' }, cmpChk, h('label', { for: 'zc-cmp' }, '교재 그림 3-14(b)와 다른 칸 표시'))),
-            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f (클릭 +1)'), gF.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '영교차 b'), gB.el))),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, 'LOG 결과 g — 선: 지금 화소의 네 쌍 (초록 통과 · 빨강 차이 부족 · 회색 점선 부호 같음)'), gG.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f (클릭 +1)'), gF.el, h('span', { class: 'caption' }, '영교차 b'), gB.el))),
           st.root,
-          h('div', { class: 'card' }, h('h3', {}, 'LOG 결과 g와 네 쌍', h('small', {}, '그림 3-14(a) 오른쪽 숫자')), gG.el, h('div', { style: { marginTop: '8px' } }, pairBox))),
+          h('div', { class: 'card' }, h('h3', {}, '네 쌍 검사표'), pairBox)),
         h('div', { class: 'stack' }, st.panel)));
       rebuild();
     },
@@ -422,7 +422,16 @@
         snap([], `완료. T_low는 넘지만 강한 에지와 이어지지 않은 화소 ${weak.length ? weak.join(', ') : '없음'}은 거짓 긍정으로 보고 버렸습니다.`);
         return fr;
       }
-      function drawG() { gv.draw(); }
+      function drawG() {
+        gv.draw();
+        if (frame.ph === 'nms' && frame.cur && frame.nb) {
+          const [y, x] = frame.cur, d = D0[y][x], ea = d * Math.PI / 4;
+          gv.overlay([
+            { type: 'line', pts: [y - Math.sin(ea) * 0.9, x - Math.cos(ea) * 0.9, y + Math.sin(ea) * 0.9, x + Math.cos(ea) * 0.9], color: '--neg', w: 3 },
+            ...frame.nb.map(([a, b]) => ({ type: 'arrow', pts: [y, x, y + (a - y) * 0.8, x + (b - x) * 0.8], color: '--bad', w: 2.5 })),
+          ]);
+        } else gv.overlay([]);
+      }
       const rebuildSmall = () => st.load(framesSmall(), frame ? Math.min(st.i, 1e9) : 0);
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(),
@@ -438,7 +447,7 @@
               UI.slider({ label: 'T_low', min: 0, max: smax, value: gl, id: 'cn-gl', oninput: v => { gl = v; rebuildSmall(); } }),
               UI.slider({ label: 'T_high', min: 0, max: smax, value: gh, id: 'cn-gh', oninput: v => { gh = v; rebuildSmall(); } })),
               h('div', { style: { marginTop: '10px' } }, gv.el),
-              h('p', { class: 'caption' }, '주황 테두리: 지금 화소 · 파란 칸: 비교 대상 이웃 / 추적 단계에서 검은 칸 = e=1')),
+              h('p', { class: 'caption' }, '주황 테두리: 지금 화소 · 파란 선: 양자화된 에지 방향 · 빨간 화살표: 에지에 수직인 두 이웃(비교 대상) / 추적 단계에서 검은 칸 = e=1, 빨간 굵은 숫자 > T_high, 주황 숫자 > T_low')),
             st.root,
             h('div', { class: 'note warn' }, '두 가지 짚을 점 — ① 교재 8행은 S를 제자리에서 0으로 바꾸는데, 그러면 이미 억제된 위·왼쪽 이웃과 비교하게 됩니다. 여기서는 억제 전의 원래 S와 비교합니다. ② 교재 23행의 visited(y,x)=0은 visited(ny,nx)=0의 오타로 보고 이웃의 방문 여부를 검사합니다.')),
           h('div', { class: 'stack' }, st.panel))));

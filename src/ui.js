@@ -296,7 +296,8 @@ const UI = (() => {
       c.strokeStyle = color; c.fillStyle = color; c.lineWidth = s.width || 2; c.globalAlpha = s.alpha || 1;
       if (s.type === 'bar') {
         const bw = s.bw || Math.max(1, (X(x0 + 1) - X(x0)) * (s.frac || .8));
-        for (const [x, y] of data) { const a = Y(Math.max(0, Math.min(y, y1))), b = Y(Math.max(y0, 0)); c.fillStyle = s.colorAt ? col(s.colorAt(x, y)) : color; c.fillRect(X(x) - bw / 2, Math.min(a, b), bw, Math.abs(b - a) || 0.5); }
+        const blo = Math.min(y0, y1), bhi = Math.max(y0, y1);
+        for (const [x, y] of data) { const a = Y(Math.max(blo, Math.min(y, bhi))), b = Y(Math.max(blo, Math.min(0, bhi))); c.fillStyle = s.colorAt ? col(s.colorAt(x, y)) : color; c.fillRect(X(x) - bw / 2, Math.min(a, b), bw, Math.abs(b - a) || 0.5); }
       } else if (s.type === 'points') {
         for (const [x, y] of data) { c.beginPath(); c.arc(X(x), Y(y), s.r || 3, 0, 7); c.fill(); }
       } else {

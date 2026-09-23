@@ -176,24 +176,27 @@
       });
       let amt = 0.08, sigma = 1, r = 1, noisy;
       const ivN = UI.ImageView({ caption: '솔트페퍼 잡음', onHover: (y, x) => hov(y, x) }), ivG = UI.ImageView({ caption: '가우시안', onHover: (y, x) => hov(y, x) }), ivM = UI.ImageView({ caption: '메디안', onHover: (y, x) => hov(y, x) });
-      const box = h('div', { class: 'card' }, h('span', { class: 'caption' }, '영상 위에 마우스를 올리면 윈도우 값을 정렬해 보여 줍니다.'));
+      const box = h('div', { class: 'card' });
       let gOut, mOut;
-      function make() {
+      let make = function () {
         const g = UI.currentImage().gray, rr = UI.rng(11);
         noisy = g.map(row => row.map(v => { const q = rr(); return q < amt / 2 ? 0 : q < amt ? 255 : v; }));
         gOut = CV.gaussianBlur(noisy, sigma); mOut = CV.median(noisy, r);
         ivN.draw(noisy); ivG.draw(gOut); ivM.draw(mOut);
-      }
+      };
       function hov(y, x) {
         const a = [], Hh = noisy.length, W = noisy[0].length;
         for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) a.push(noisy[CV.clamp(y + j, 0, Hh - 1)][CV.clamp(x + i, 0, W - 1)]);
         const s = a.slice().sort((p, q) => p - q), mid = s.length >> 1, mean = a.reduce((p, q) => p + q, 0) / a.length;
-        box.replaceChildren(h('h3', {}, `(${y}, ${x}) 주변 ${2 * r + 1}×${2 * r + 1} 윈도우`),
+        const zoom = UI.GridView({ rows: 2 * r + 1, cols: 2 * r + 1, cs: 40, fs: 11, axes: false, cell: (j, i) => { const v = noisy[CV.clamp(y + j - r, 0, Hh - 1)][CV.clamp(x + i - r, 0, W - 1)]; return { t: v, ...APP.grayCell(v), cls: j === r && i === r ? 'cur' : '' }; } }); zoom.draw();
+        box.replaceChildren(h('h3', {}, `(${y}, ${x}) 주변 ${2 * r + 1}×${2 * r + 1} 윈도우`), h('div', { class: 'row', style: { alignItems: 'center' } }, zoom.el, h('div', { class: 'col', style: { flex: '1 1 300px' } }, h('span', { class: 'caption' }, '→ 값을 정렬하면'),
           h('div', { class: 'chips' }, s.map((v, k) => h('span', { class: 'lit' + (k === mid ? ' t' : v === 0 || v === 255 ? ' f' : '') }, v))),
-          h('p', { class: 'caption' }, h('b', {}, `메디안 = ${s[mid]}`), ` (정렬한 ${s.length}개 중 ${mid + 1}번째) · 단순 평균 = ${mean.toFixed(1)} · 가우시안 결과 = ${gOut[y][x].toFixed(1)} · 빨강: 잡음(0 또는 255)`));
+          h('p', { class: 'caption' }, h('b', {}, `메디안 = ${s[mid]}`), ` (정렬한 ${s.length}개 중 ${mid + 1}번째, 초록) · 단순 평균 = ${mean.toFixed(1)} · 가우시안 결과 = ${gOut[y][x].toFixed(1)} · 빨강: 잡음(0 또는 255)`), h('p', { class: 'caption' }, '잡음 값은 정렬하면 양 끝으로 밀려나 가운데 값에 영향을 못 줍니다. 평균·가우시안은 255 하나만 섞여도 값이 끌려갑니다.'))));
         [ivN, ivG, ivM].forEach((iv, k) => iv.draw([noisy, gOut, mOut][k], 'gray', { rects: [{ x: x - r, y: y - r, ww: 2 * r + 1, hh: 2 * r + 1 }] }));
       }
-      UI.onImage(make);
+      const pickDefault = () => { const g0 = UI.currentImage().gray; for (let y = 20; y < noisy.length - 20; y++) for (let x = 20; x < noisy[0].length - 20; x++) if (noisy[y][x] === 255 && g0[y][x] < 120) return [y, x]; return [noisy.length >> 1, noisy[0].length >> 1]; };
+      const make0 = make; make = () => { make0(); hov(...pickDefault()); };
+      UI.onImage(() => make());
       root.append(h('div', { class: 'stack' },
         h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(),
           UI.slider({ label: '잡음 비율', min: 0, max: 0.3, step: 0.01, value: amt, id: 'md-amt', fmt: v => Math.round(v * 100) + '%', oninput: v => { amt = v; make(); } }),
@@ -261,7 +264,7 @@
         }
         const holes = []; let nh = 0;
         for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) { const [yf, xf] = CV.M.apply([y, x, 1], Hi); if (hole[y][x] && yf >= 0 && xf >= 0 && yf <= Hh - 1 && xf <= W - 1) { holes.push({ y, x, color: '--orange' }); nh++; } }
-        ivF.draw(fw, 'gray', { marks: holes }); ivF.setInfo(`구멍 ${nh}개`); ivBn.draw(bn); ivBl.draw(bl);
+        ivF.draw(fw); ivF.setInfo(`구멍(검은 점) ${nh}개`); ivBn.draw(bn); ivBl.draw(bl);
       }
       UI.onImage(warp);
       // bilinear calculator
@@ -298,7 +301,7 @@
         h('div', { class: 'card' }, h('h3', {}, '영상에 적용: 전방 vs 후방', h('small', {}, '그림 2-27')),
           h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: '회전 θ', min: -180, max: 180, value: ang, id: 'geo-ang', fmt: v => v + '°', oninput: v => { ang = v; warp(); } }), UI.slider({ label: '확대', min: 0.5, max: 3, step: 0.05, value: sc, id: 'geo-sc', fmt: v => v.toFixed(2), oninput: v => { sc = v; warp(); } })),
           h('div', { class: 'imgs', style: { marginTop: '10px' } }, ivF.el, ivBn.el, ivBl.el),
-          h('p', { class: 'caption' }, '전방 변환은 원본 화소를 보내는 방식이라, 확대하면 아무도 도착하지 않는 칸(주황 점 = 구멍)이 생깁니다. 후방 변환은 결과 화소마다 H⁻¹로 원본 위치를 찾아오므로 구멍이 없고, 실수 좌표를 보간하면 계단 현상(에일리어싱)도 줄어듭니다.')),
+          h('p', { class: 'caption' }, '전방 변환은 원본 화소를 보내는 방식이라, 확대하면 아무도 도착하지 않는 칸(검은 점 = 구멍)이 생깁니다. 후방 변환은 결과 화소마다 H⁻¹로 원본 위치를 찾아오므로 구멍이 없고, 실수 좌표를 보간하면 계단 현상(에일리어싱)도 줄어듭니다.')),
         h('div', { class: 'lab' },
           h('div', { class: 'card' }, h('h3', {}, '양선형 보간 계산기', h('small', {}, '빨간 점을 끌어 보세요')), h('div', { class: 'row' }, bsvg, h('div', { class: 'col', style: { flex: '1 1 240px' } }, h('div', { class: 'controls' }, ...binps.map((inp, k) => UI.labeled(['f(y,x)', 'f(y,x+1)', 'f(y+1,x)', 'f(y+1,x+1)'][k], inp))), bout))),
           h('div', { class: 'formula-card' }, h('div', { class: 'eq' }, R`$$f(y,x')=(1-\alpha)f(y,x)+\alpha f(y,x+1)$$`), h('div', { class: 'eq' }, R`$$f(y+1,x')=(1-\alpha)f(y+1,x)+\alpha f(y+1,x+1)$$`), h('div', { class: 'eq' }, R`$$f(y',x')=(1-\beta)f(y,x')+\beta f(y+1,x')$$`), h('div', { class: 'tag' }, '식 (2.18) — 가로로 두 번, 세로로 한 번 선형 보간')))));

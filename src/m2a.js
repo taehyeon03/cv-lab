@@ -47,6 +47,8 @@
       });
       const cvH = h('canvas'), cvC = h('canvas'), cvO = h('canvas');
       const tbl = h('div');
+      const mapSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      mapSvg.setAttribute('viewBox', '0 0 460 150'); mapSvg.style.width = '100%'; mapSvg.style.maxWidth = '560px';
       let E = CV.equalize(f, L);
       function rebuild() {
         E = CV.equalize(f, L);
@@ -77,6 +79,22 @@
         if (ph === 4) for (let p = 0; p <= k; p++) ho[E.map[f[p >> 3][p & 7]]]++;
         UI.plot(cvO, { w: 300, h: 170, x: [-0.5, L - 0.5], y: [0, hmax], xticks: [...Array(L).keys()], series: [{ type: 'bar', data: ho, color: '--green' }] });
         const show = (p, l) => ph > p || (ph === p && l <= k);
+        {
+          const X = l => 30 + l * 57, hm = Math.max(...E.h, 1);
+          let s = `<text x="0" y="28" font-size="11" fill="var(--muted)">입력</text><text x="0" y="134" font-size="11" fill="var(--muted)">출력</text>`;
+          for (let l = 0; l < L; l++) {
+            const w = 3 + E.h[l] / hm * 30;
+            s += `<rect x="${X(l) - w / 2}" y="10" width="${w}" height="22" rx="3" fill="var(--ink)" opacity="${E.h[l] ? 0.85 : 0.12}"/><text x="${X(l)}" y="46" font-size="11" text-anchor="middle" fill="var(--muted)">${l}</text>`;
+            s += `<text x="${X(l)}" y="104" font-size="11" text-anchor="middle" fill="var(--muted)">${l}</text>`;
+          }
+          const ho2 = new Array(L).fill(0); E.h.forEach((c, l) => (ho2[E.map[l]] += c));
+          for (let l = 0; l < L; l++) if (show(3, l) && E.h[l]) {
+            const on = ph === 3 && l === k;
+            s += `<path d="M${X(l)},34 C${X(l)},70 ${X(E.map[l])},62 ${X(E.map[l])},94" fill="none" stroke="var(${on ? '--orange' : '--green'})" stroke-width="${1.5 + E.h[l] / hm * 5}" opacity="${on ? 1 : 0.7}"/>`;
+          }
+          if (ph >= 3) for (let l = 0; l < L; l++) { const c = ph === 3 ? E.h.reduce((a, v, i) => a + (i <= k && E.map[i] === l ? v : 0), 0) : ho2[l]; const w = 3 + c / hm * 30; s += `<rect x="${X(l) - w / 2}" y="110" width="${w}" height="22" rx="3" fill="var(--green)" opacity="${c ? 0.9 : 0.12}"/>`; }
+          mapSvg.innerHTML = s;
+        }
         tbl.replaceChildren(UI.dataTable(['l<sub>in</sub>', 'h(l)', 'ĥ(l)', 'c(l)', 'c(l)×7', 'l<sub>out</sub>'],
           E.h.map((v, l) => [l, ph === 0 ? hp[l] : v, show(1, l) ? E.hn[l] : '', show(2, l) ? E.c[l] : '', show(3, l) ? E.c[l] * 7 : '', show(3, l) ? E.map[l] : '']), frame.row));
       }
@@ -101,7 +119,8 @@
             h('div', { class: 'controls', style: { marginTop: '8px' } }, h('button', { class: 'btn', onclick: () => { f = APP.parseGrid(EX21); rebuild(); } }, '예제 2-1로 되돌리기'), h('button', { class: 'btn', onclick: () => { const r = UI.rng(Date.now()); f = f.map(row => row.map(() => Math.min(7, Math.floor(r() * r() * 5)))); rebuild(); } }, '어두운 무작위 영상'))),
           st.root,
           h('div', { class: 'card' }, h('h3', {}, '매핑 표 T(·)', h('small', {}, '그림 2-9(a)')),
-            h('div', { class: 'row' }, tbl, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvC, h('span', { class: 'caption' }, '누적 c(l)×(L−1) 곡선이 곧 매핑 함수입니다')))),
+            h('div', { class: 'row' }, tbl, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvC, h('span', { class: 'caption' }, '누적 c(l)×(L−1) 곡선이 곧 매핑 함수입니다'))),
+            h('div', { style: { marginTop: '12px' } }, mapSvg, h('span', { class: 'caption' }, '각 명암값이 어디로 옮겨 가는지 — 막대 폭 = 화소 수. 많이 몰린 값(3, 4)은 서로 멀리 떨어지고, 드문 값(5, 6)은 7로 합쳐져 분포가 넓게 퍼집니다.'))),
           h('div', { class: 'card' }, h('h3', {}, '평활화된 영상', h('small', {}, '그림 2-9(b)(c)')),
             h('div', { class: 'row' }, gout.el, h('div', { class: 'col', style: { flex: '1 1 260px' } }, cvO, h('span', { class: 'caption' }, '새 히스토그램 — 동적 범위 [2,6] → [1,7]'))))),
         h('div', { class: 'stack' }, st.panel,
@@ -137,6 +156,7 @@
       const st = UI.Stepper({ code: CODE, title: '오츄 의사 코드', render: fr => { frame = fr; draw(); } });
       const cvH = h('canvas'), cvV = h('canvas');
       const ivIn = UI.ImageView({ caption: '입력 영상' }), ivB = UI.ImageView({ caption: '현재 t로 이진화' });
+      const varBar = h('div', { class: 'col', style: { gap: '4px' } });
       function rebuild() {
         const g = UI.currentImage().gray;
         hist = CV.histogram(g, 256); O = CV.otsu(hist);
@@ -152,7 +172,21 @@
       function draw() {
         const t = frame.t, g = UI.currentImage().gray;
         const mx = Math.max(...hist) * 0.7;
-        UI.plot(cvH, { w: 560, h: 170, x: [0, 255], y: [0, mx], series: [{ type: 'bar', data: hist, bw: 1.6, colorAt: x => (x <= t ? '--ink' : '--orange') }], vlines: [{ x: t, label: 't=' + t, color: '--green' }, { x: frame.best, label: 'T=' + frame.best, color: '--neg', dash: [4, 3] }] });
+        const rw = O.rows[t];
+        const pl = UI.plot(cvH, { w: 560, h: 190, x: [0, 255], y: [0, mx], series: [{ type: 'bar', data: hist, bw: 1.6, colorAt: x => (x <= t ? '--ink' : '--orange') }], vlines: [{ x: t, label: 't=' + t, color: '--green' }, { x: frame.best, label: 'T=' + frame.best, color: '--neg', dash: [4, 3] }] });
+        const cx = cvH.getContext('2d'), band = (m, v, col, lab) => {
+          if (!v && !m) return; const sd = Math.sqrt(v), y = pl.H - pl.m.b - 16;
+          cx.fillStyle = UI.col(col); cx.globalAlpha = 0.18; cx.fillRect(pl.X(Math.max(0, m - sd)), pl.m.t, pl.X(Math.min(255, m + sd)) - pl.X(Math.max(0, m - sd)), pl.H - pl.m.t - pl.m.b); cx.globalAlpha = 1;
+          cx.strokeStyle = UI.col(col); cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(pl.X(m - sd), y); cx.lineTo(pl.X(m + sd), y); cx.stroke();
+          cx.beginPath(); cx.arc(pl.X(m), y, 4.5, 0, 7); cx.fill();
+          cx.font = '11px ' + UI.tok('--mono').split(',')[0]; cx.textAlign = 'center'; cx.fillText(lab, pl.X(m), y - 8);
+        };
+        band(rw.m0, rw.v0, '--neg', 'μ₀±σ₀'); band(rw.m1, rw.v1, '--bad', 'μ₁±σ₁');
+        const tot = rw.w0 * rw.v0 + rw.w1 * rw.v1 || 1, vmx = Math.max(...O.rows.map(r => r.vw));
+        varBar.replaceChildren(
+          h('div', { class: 'caption' }, `v_within(${t}) = w₀v₀ + w₁v₁ = ${(rw.w0 * rw.v0).toFixed(0)} + ${(rw.w1 * rw.v1).toFixed(0)} = ${rw.vw.toFixed(0)}`),
+          h('div', { style: { display: 'flex', height: '18px', width: (rw.vw / vmx * 100) + '%', minWidth: '4px', borderRadius: '4px', overflow: 'hidden', transition: 'width .1s' } },
+            h('div', { style: { flex: String(rw.w0 * rw.v0 / tot), background: 'var(--neg)' } }), h('div', { style: { flex: String(rw.w1 * rw.v1 / tot), background: 'var(--bad)' } })));
         const vmax = Math.max(...O.rows.map(r => r.vw));
         UI.plot(cvV, { w: 560, h: 150, x: [0, 255], y: [0, vmax], series: [{ type: 'line', data: O.rows.slice(0, t + 1).map(r => [r.t, r.vw]), color: '--green' }], dots: [{ x: frame.best, y: O.rows[frame.best].vw, color: '--neg', label: 'min' }], yfmt: v => Math.round(v) });
         ivB.draw(g.map(r => r.map(v => (v > t ? 255 : 0))));
@@ -162,7 +196,8 @@
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker()),
-            h('div', { style: { marginTop: '8px' } }, cvH, h('span', { class: 'caption' }, '히스토그램 — 검정: 흑 그룹 [0,t], 주황: 백 그룹 [t+1,255]')),
+            h('div', { style: { marginTop: '8px' } }, cvH, h('span', { class: 'caption' }, '히스토그램 — 검정: 흑 그룹 [0,t], 주황: 백 그룹 [t+1,255]. 파랑/빨강 띠: 각 그룹의 평균 μ ± 표준편차 σ — 띠가 좁을수록 그룹이 균일합니다.')),
+            h('div', { style: { marginTop: '8px' } }, varBar, h('span', { class: 'caption' }, '막대 길이 = v_within (짧을수록 좋음), 파랑 = 흑 그룹 몫 w₀v₀, 빨강 = 백 그룹 몫 w₁v₁')),
             h('div', { style: { marginTop: '8px' } }, cvV, h('span', { class: 'caption' }, 'v_within(t) — 골짜기의 바닥이 T'))),
           st.root,
           h('div', { class: 'imgs two' }, ivIn.el, ivB.el)),
@@ -295,6 +330,7 @@
       const lab = h('div', { class: 'lab wide-code' });
       function rebuild() {
         if (algo === 'eff' && conn === 8) { conn = 4; connSeg.set(4); }
+        gIn.draw();
         const code = algo === 'rec' ? recCode(conn) : EFF_CODE;
         const prev = st;
         st = UI.Stepper({ code, title: algo === 'rec' ? `알고리즘 2-5 범람 채움 (${conn}-연결성)` : '알고리즘 2-6 범람 채움 (메모리 절약)', render: fr => { frame = fr; gL.draw(); } });

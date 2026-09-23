@@ -42,6 +42,9 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+img { max-width: 100%; }
 html, body { background: var(--ground); color: var(--ink); }
 body { font-family: var(--sans); font-size: 15px; line-height: 1.6; }
 button, input, select { font: inherit; color: inherit; }
@@ -89,6 +92,9 @@ main { padding-block: 28px 80px; padding-inline: 36px; min-width: 0; }
 .lab { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
 .lab.wide-code { grid-template-columns: minmax(0, 1fr) 460px; }
 .stack { display: grid; gap: 16px; min-width: 0; }
+.lab > .stack:last-child { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto; }
+.lab > .stack:last-child .code { max-height: 46vh; }
+@media (max-width: 1100px) { .lab > .stack:last-child { position: static; max-height: none; overflow: visible; } }
 .row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .row > * { min-width: 0; }
 .col { display: grid; gap: 8px; }

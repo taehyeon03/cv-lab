@@ -187,12 +187,20 @@
         const [y, x] = sel;
         if (!e[y][x]) { insBox.replaceChildren(h('span', { class: 'caption' }, `(${y},${x})는 에지 화소가 아닙니다. 에지 화소를 클릭해 보세요.`)); return; }
         const { n, c } = CV.transitions(e, y, x), LAB = [[5, 6, 7], [4, -1, 0], [3, 2, 1]];
-        const mini = UI.GridView({ rows: 3, cols: 3, cs: 46, fs: 15, axes: false, cell: (j, i) => { const k = LAB[j][i]; if (k < 0) return { t: 'p', cls: 'cur' }; const hit = n[(k + 7) % 8] === 0 && n[k] === 1; return { t: n[k], sub: 'n' + k, cls: n[k] ? 'on' : '', badge: hit ? '0→1' : undefined, badgeColor: 'var(--orange)' }; } });
-        mini.draw();
-        const ring = [0, 1, 2, 3, 4, 5, 6, 7].map(k => { const p = [[1, 2], [2, 2], [2, 1], [2, 0], [1, 0], [0, 0], [0, 1], [0, 2]][k]; return p; });
-        mini.overlay(ring.map((p, k) => { const q = ring[(k + 1) % 8]; const hit = n[k] === 0 && n[(k + 1) % 8] === 1; return { type: 'arrow', pts: [p[0], p[1], q[0], q[1]], color: hit ? '--orange' : '--faint', w: hit ? 3 : 1.2, op: hit ? 1 : 0.6 }; }));
+        const mini = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        mini.setAttribute('viewBox', '-110 -110 220 220'); mini.style.width = '210px';
+        const P = k => [Math.cos(k * Math.PI / 4) * 70, Math.sin(k * Math.PI / 4) * 70];
+        let sv = `<defs><marker id="trk-ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--orange)"/></marker></defs>`;
+        for (let k = 0; k < 8; k++) {
+          const a = (k * 45 + 8) * Math.PI / 180, b = ((k + 1) * 45 - 8) * Math.PI / 180, hit = n[k] === 0 && n[(k + 1) % 8] === 1;
+          sv += `<path d="M${Math.cos(a) * 70},${Math.sin(a) * 70} A70,70 0 0 1 ${Math.cos(b) * 70},${Math.sin(b) * 70}" fill="none" stroke="var(${hit ? '--orange' : '--rule'})" stroke-width="${hit ? 4 : 2}" ${hit ? 'marker-end="url(#trk-ar)"' : ''}/>`;
+          if (hit) { const m = (k * 45 + 22.5) * Math.PI / 180; sv += `<text x="${Math.cos(m) * 98}" y="${Math.sin(m) * 98 + 4}" font-size="11" text-anchor="middle" fill="var(--orange)" font-weight="700">0→1</text>`; }
+        }
+        for (let k = 0; k < 8; k++) { const [x, y] = P(k); sv += `<circle cx="${x}" cy="${y}" r="15" fill="var(${n[k] ? '--cell-on' : '--cell-bg'})" stroke="var(--ink)"/><text x="${x}" y="${y + 4}" font-size="12" text-anchor="middle" fill="var(${n[k] ? '--cell-on-ink' : '--ink'})">n${k}</text>`; }
+        sv += `<circle r="17" fill="var(--orange)"/><text y="5" font-size="14" text-anchor="middle" fill="#fff" font-weight="700">p</text>`;
+        mini.innerHTML = sv;
         const kind = c === 1 ? '끝점 (@)' : c === 2 ? '통과점 (o)' : c >= 3 ? '분기점 (+)' : '고립점';
-        insBox.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, mini.el, h('div', { class: 'col' },
+        insBox.replaceChildren(h('div', { class: 'row', style: { alignItems: 'center' } }, mini, h('div', { class: 'col', style: { flex: '1 1 260px' } },
           h('span', { class: 'mono' }, `(${y},${x}) 이웃 n0…n7 = ${n.join(' ')}`), h('span', {}, `n0→n1→…→n7→n0 순서로 한 바퀴 돌며 0 다음에 1이 오는 곳을 세면 `, h('b', {}, `c = ${c}`), ` → `, h('b', { style: { color: 'var(--orange)' } }, kind)),
           h('span', { class: 'caption' }, '이웃 화소의 개수가 아니라 “덩어리” 개수를 세는 셈입니다. 이웃 3개가 붙어 있으면(ㄱ자) 한 덩어리라 c=1 또는 2가 되어 분기점이 아닙니다 — 그림 3-25의 a, c가 그런 경우입니다.'))));
       }
