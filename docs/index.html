@@ -235,6 +235,14 @@ table.data td.cur { background: var(--hl); }
 .intro-grid .card { height: 100%; display: grid; gap: 4px; align-content: start; transition: border-color .15s; }
 .intro-grid .card:hover { border-color: var(--orange); }
 .intro-grid .n { font-family: var(--mono); color: var(--orange); font-size: 12px; }
+.faq { margin: 0 0 16px; padding: 12px 18px; }
+.faq > h3 { margin-bottom: 4px; }
+.faq details { border-top: 1px solid var(--rule); padding: 7px 0; }
+.faq details:first-of-type { border-top: 0; }
+.faq summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink); }
+.faq summary::marker { color: var(--orange); }
+.faq .a { font-size: 13.5px; margin: 6px 0 2px 18px; max-width: 80ch; }
+.faq .a b { color: var(--orange); font-weight: 600; }
 
 @media (max-width: 1100px) {
   .lab, .lab.wide-code { grid-template-columns: minmax(0, 1fr); }
@@ -1051,6 +1059,40 @@ const APP = (() => {
     root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 그림 3-22, 3-25)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
   }
 
+  // "헷갈리기 쉬운 점" — short Q&A shown under each module's formulas (collapsed)
+  const FAQ = {
+    deriv: [
+      ['이진화(|f′| ≥ T)는 뭘 하는 건가요?', '미분 크기가 임계값 T 이상이면 1(에지), 아니면 0으로 바꿉니다. 절댓값이라 밝아지는 에지와 어두워지는 에지를 똑같이 잡습니다. 그림 3-2에서 |f′| = 0 1 1 1 2 <b>4</b> 0 1 1이므로 4 하나만 넘어 <b>x=5만 1</b>입니다. 마지막 칸이 “−”인 것은 f(10)이 없어 f′(9)를 계산할 수 없기 때문입니다.'],
+      ['T는 어떻게 정하나요? (임계값 = 넘으면 예, 못 넘으면 아니오로 나누는 기준선)', '교재는 값을 주지 않습니다. 그림 3-2와 같은 결과는 <b>2 &lt; T ≤ 4</b>이면 모두 나오며, “그림 3-2” 버튼은 T=3을 씁니다. 실제로는 실험으로 고르거나, 최댓값의 비율, 히스토그램(오츄), 캐니처럼 두 개를 쓰는 방법이 있습니다. 너무 낮으면 거짓 에지, 너무 높으면 실종된 에지가 늘어납니다.'],
+      ['f′(x) ≈ f(x+1) − f(x)에는 왜 분모가 없나요?', '분모 Δx = 1이라 1로 나눈 것입니다. 화소는 정수 위치에만 있어 간격을 1보다 줄일 수 없습니다. 양옆 화소를 쓰면 Δx=2라 식 (3.4)처럼 /2가 남지만, 모든 화소에 같은 수로 나누는 것은 크기만 바꾸고 에지 위치는 그대로라 마스크에서는 생략합니다 → [−1 0 1].'],
+      ['2차 미분 마스크 [1 −2 1]은 어떻게 나오나요?', '1차 미분 차분을 한 번 더 적용합니다.<br>f″(x) ≈ f′(x+1) − f′(x) = [f(x+2) − f(x+1)] − [f(x+1) − f(x)] = f(x+2) − <b>2</b>f(x+1) + f(x)<br>가운데를 x로 옮기면 <b>f(x+1) − 2f(x) + f(x−1)</b> → [1 −2 1]. 뜻은 “오른쪽 기울기 − 왼쪽 기울기”라서, 직선이면 0이고 기울기가 꺾이는 곳에서 +, −가 나옵니다.'],
+    ],
+    sobel: [
+      ['로버츠는 왜 2×2이고 대각선인가요?', '지금 화소 (y,x)를 마스크 왼쪽 위 칸에 놓습니다. d<sub>y</sub> = f(y+1,x) − f(y,x+1) (↙ 대각선), d<sub>x</sub> = f(y+1,x+1) − f(y,x) (↘ 대각선). 2×2에서 가로·세로 차분은 서로 다른 위치의 값이지만, 두 대각선은 모두 2×2의 <b>정중앙</b>을 지나므로 같은 점에서 잰 수직인 두 미분이 됩니다. 대각선 거리가 √2라 강도는 √2배, 방향은 <b>45° 돌아간 값</b>입니다(아래 다이얼도 그 값). 스무딩이 없어 잡음에 가장 약합니다.'],
+      ['프레윗·소벨 행렬은 어떻게 만들어지나요?', '세로 성분 × 가로 성분으로 만듭니다. 미분 방향은 [−1 0 1] 차분, 그 <b>수직 방향</b>은 평균입니다.<br>프레윗 m<sub>x</sub> = [1 1 1]<sup>T</sup> × [−1 0 1] → 세 줄 모두 −1 0 1<br>소벨 m<sub>x</sub> = [1 2 1]<sup>T</sup> × [−1 0 1] → 가운데 줄만 −2 0 2<br>[1 2 1]은 가운데 줄을 더 믿는 가중 평균으로, 가장 작은 가우시안 근사입니다. 3, 4로 나누는 정규화는 생략합니다. 요약: 수직 방향 스무딩이 로버츠 없음 → 프레윗 평균 → 소벨 가중 평균.'],
+    ],
+    zc: [
+      ['예제는 (6,3) 하나만 설명하는데, 결과에는 1이 왜 여러 개인가요?', '(6,3)은 판정 과정을 보여 주는 <b>예시</b>일 뿐이고, 그림 3-14(b)에는 1이 <b>21개</b> 있습니다. “두 개 이상” 규칙은 강의자료 21쪽 조건 그대로이며, 교재 g로 계산하면 그림과 정확히 같습니다(“하나 이상”으로 바꾸면 28개로 7칸이 틀립니다).'],
+      ['통과한 쌍이 3개, 4개면 어떻게 되나요?', 'b는 이진 영상이라 2개든 3개든 4개든 모두 <b>1</b>입니다. 예제 3-2에서 2쌍 8개 + 3쌍 9개 + 4쌍 4개 = 21개가 그림 3-14(b)의 1입니다. 몇 쌍이 통과했는지는 따로 저장하지 않습니다.'],
+      ['여기서 T는 무엇을 하나요?', '부호가 다른 쌍이라도 값 차이 |a − b|가 T를 넘어야 통과합니다. LOG 결과는 평탄한 곳에서 0 근처를 오르내려 잡음만으로도 부호가 바뀌므로, <b>급하게 뒤집힌 곳만</b> 영교차로 인정하려는 기준입니다. 예제 3-2에서 T를 0~1 → 3 → 5 → 12로 올리면 에지가 21 → 18 → 14 → 2개로 줄어듭니다.'],
+    ],
+    canny: [
+      ['비최대 억제에서 비교할 두 이웃은 어떻게 고르나요?', '<b>에지 방향(경계선이 뻗은 방향)에 수직</b>, 즉 경계를 가로지르는 방향의 두 이웃입니다. 가로선(방향 0)은 위·아래, 세로선(2)은 왼쪽·오른쪽, ↘ 대각선(1)은 오른쪽 위·왼쪽 아래, ↙ 대각선(3)은 왼쪽 위·오른쪽 아래(그림 3-17). 같은 선 위의 이웃과 비교하면 값이 비슷해 모두 지워집니다. 방향 4~7은 같은 선을 반대로 본 것이라 0~3과 같은 이웃을 씁니다.'],
+      ['이웃이 크면 가운데가 0이 되나요?', '네. 두 이웃 중 <b>하나라도 크거나 같으면</b> 0입니다(or, ≤). 양쪽보다 모두 커야 남습니다. 예: 80 / <b>150</b> / 90 → 유지, 200 / 150 / 90 → 0. “가로지르는 방향에서 꼭대기여야 산다.”'],
+      ['466 vs 466처럼 같은데도 억제되는 게 맞나요?', '교재 8행이 ≤라서 맞습니다. 다만 이웃 (5,1)도 같은 이유로 지워져, 이 예제에서는 정사각형 왼쪽 경계의 4~6행이 <b>둘 다 사라져 끊깁니다</b>. 진짜 경계가 두 화소 사이에 있어 양쪽 강도가 같기 때문입니다. 실제 구현은 한쪽에만 등호를 붙여(&lt;, ≤) 동점이면 하나만 남깁니다. 시험은 교재 규칙(≤)대로 답하면 됩니다.'],
+      ['T_low와 T_high는 언제 쓰나요?', '비최대 억제(5~9행)에는 임계값이 없습니다. 그다음 이력 임계값(12~23행)에서 씁니다. <b>T_high = 추적 시작</b>(16행: S &gt; T_high인 화소에서 follow_edge 시작), <b>T_low = 추적 이어 가기</b>(23행: 이웃 S &gt; T_low이면 따라감). T_low는 넘어도 강한 에지와 이어지지 않은 화소는 버려집니다. 캐니는 T_high : T_low를 2:1~3:1 정도로 권했습니다.'],
+    ],
+    backproj: [
+      ['식 (2.4)에서 min(·, 1.0)은 왜 쓰나요?', 'ĥ<sub>m</sub>/ĥ<sub>i</sub>로 나누면 영상 전체에 흔한 색은 깎이고 얼굴에 특징적인 색은 커집니다. 그런데 ĥ<sub>i</sub>가 작으면 비율이 몇십 배까지 커지므로, 1에서 잘라 ① 신뢰도를 0~1로 두고 ② 드문 색 몇 칸이 결과를 독차지하지 않게 하고 ③ 분모가 작은 칸의 불안정한 값을 막습니다. 예: 0.30/0.05 = 6.0 → 1.0, 0.10/0.40 = 0.25 → 0.25.'],
+    ],
+  };
+  function insertFaq(el, items) {
+    const box = h('div', { class: 'card faq' }, h('h3', {}, '헷갈리기 쉬운 점', h('small', {}, '질문을 눌러 펼치기')),
+      items.map(([q, a]) => h('details', {}, h('summary', {}, q), h('div', { class: 'a', html: a }))));
+    const after = el.querySelector('.formula-card') || el.querySelector('.lead');
+    if (after) after.after(box); else el.prepend(box);
+  }
+
   function nav() {
     const rail = document.getElementById('rail'), msel = document.getElementById('msel');
     const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출']];
@@ -1079,6 +1121,7 @@ const APP = (() => {
       main.append(el);
       mounted.set(key, el);
       if (m) m.mount(el, m); else intro(el);
+      if (m && FAQ[m.id]) insertFaq(el, FAQ[m.id]);
       UI.typeset(el);
     }
     mounted.get(key).hidden = false;
@@ -1234,6 +1277,371 @@ const APP = (() => {
             h('div', { class: 'imgs two', style: { marginTop: '8px' } }, h('div', {}, ivA.el, cvA), h('div', {}, ivB.el, cvB)),
             h('p', { class: 'caption' }, '명암이 좁은 구간에 몰린 영상을 평활화하면 0~255 전체로 퍼집니다. 다만 빈칸이 생긴 빗살 모양 히스토그램이 되고, 영상에 따라 잡음이 강조될 수도 있습니다(그림 2-11).')))));
       rebuild(); real();
+    },
+  });
+
+  // ================= 2.2.3 histogram backprojection =================
+  const BP_TYPES = {
+    R: ['바위', [120, 120, 120]], G: ['풀', [80, 140, 60]], F: ['얼굴 피부', [230, 150, 110]], K: ['손 피부', [205, 135, 100]],
+    E: ['눈', [60, 45, 40]], L: ['입술', [190, 70, 80]], S: ['옷', [160, 150, 120]],
+  };
+  const BP_EX = `R R F F F R R R
+R F F F F F R R
+R F E F E F R R
+R F F F F F R R
+R R F L F R R R
+S S S S S S S G
+S S K K S S S G
+G G G G G G G G`;
+  const bpQ = (hh, s, q) => [CV.clamp(Math.floor((((hh % 360) + 360) % 360) / 360 * q), 0, q - 1), CV.clamp(Math.floor(s * q), 0, q - 1)]; // clamp: S of a grey pixel can come out as -2e-16
+  const bpHS = ([r, g, b]) => { const o = CV.rgb2hsi(r / 255, g / 255, b / 255); return [o.h % 360, o.s]; };
+  const BP_RAMP = [[18, 22, 40], [84, 38, 110], [196, 66, 72], [243, 150, 58], [252, 236, 170]];
+  const bpRamp = t => {
+    t = Math.max(0, Math.min(1, t)) * (BP_RAMP.length - 1);
+    const k = Math.min(BP_RAMP.length - 2, Math.floor(t)), f = t - k, a = BP_RAMP[k], b = BP_RAMP[k + 1];
+    return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * f)).join(',')})`;
+  };
+  function bpHeat(cv, G, { sqrt = false, max, hl } = {}) {
+    const q = G.length, S = Math.max(3, Math.floor(240 / q)), n = q * S;
+    if (cv.width !== n) { cv.width = n; cv.height = n; }
+    const c = cv.getContext('2d'), mx = max || Math.max(1e-12, ...G.flat());
+    for (let j = 0; j < q; j++) for (let i = 0; i < q; i++) { let t = G[j][i] / mx; if (sqrt) t = Math.sqrt(t); c.fillStyle = bpRamp(t); c.fillRect(i * S, j * S, S, S); }
+    if (S >= 10) {
+      c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 1; c.beginPath();
+      for (let k = 1; k < q; k++) { c.moveTo(k * S + 0.5, 0); c.lineTo(k * S + 0.5, n); c.moveTo(0, k * S + 0.5); c.lineTo(n, k * S + 0.5); }
+      c.stroke();
+    }
+    if (hl) { const p = S < 8 ? 3 : 0; c.lineWidth = 3; c.strokeStyle = '#19d3ff'; c.strokeRect(hl[1] * S + 1.5 - p, hl[0] * S + 1.5 - p, S - 3 + 2 * p, S - 3 + 2 * p); }
+  }
+  // synthetic scene in the spirit of Fig 2-13: face, hands, olive clothes, a wooden crate of skin-like hue, rock and grass
+  function bpScene() {
+    const W = 160, H = 120, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 0, 92); g.addColorStop(0, '#8e8d86'); g.addColorStop(1, '#6e6f68'); x.fillStyle = g; x.fillRect(0, 0, W, 92);
+    x.strokeStyle = '#55564f'; x.lineWidth = 1.5;
+    [[0, 20, 40, 28, 62, 16], [104, 40, 130, 34, 160, 46], [8, 60, 30, 72, 46, 64], [112, 12, 130, 22, 150, 8]].forEach(([a, b, c2, d, e, f]) => { x.beginPath(); x.moveTo(a, b); x.quadraticCurveTo(c2, d, e, f); x.stroke(); });
+    x.fillStyle = '#5d8a3a'; x.fillRect(0, 92, W, 28);
+    x.fillStyle = 'rgb(196,128,100)'; x.fillRect(124, 64, 30, 30);
+    x.strokeStyle = 'rgb(150,98,78)'; x.lineWidth = 2; x.strokeRect(125, 65, 28, 28); x.beginPath(); x.moveTo(125, 65); x.lineTo(153, 93); x.stroke();
+    x.fillStyle = 'rgb(150,145,100)'; x.beginPath(); x.moveTo(62, 58); x.lineTo(98, 58); x.lineTo(112, 104); x.lineTo(48, 104); x.closePath(); x.fill();
+    x.fillStyle = 'rgb(130,126,90)'; x.fillRect(50, 98, 60, 14);
+    x.fillStyle = 'rgb(170,52,44)'; x.fillRect(58, 66, 7, 8);
+    x.fillStyle = 'rgb(212,145,116)'; x.fillRect(74, 52, 12, 8);
+    x.fillStyle = 'rgb(222,150,120)'; x.beginPath(); x.ellipse(80, 42, 12, 14, 0, 0, 7); x.fill();
+    x.fillStyle = 'rgb(74,78,58)'; x.beginPath(); x.ellipse(80, 29, 15, 10, 0, Math.PI, 0); x.fill(); x.fillRect(63, 28, 34, 4);
+    x.fillStyle = 'rgb(58,42,36)'; [75, 85].forEach(ex => { x.beginPath(); x.ellipse(ex, 40, 2.2, 1.4, 0, 0, 7); x.fill(); });
+    x.fillStyle = 'rgb(176,78,74)'; x.beginPath(); x.ellipse(80, 49, 4.5, 1.8, 0, 0, 7); x.fill();
+    x.fillStyle = 'rgb(205,140,112)';
+    [[68, 86, 0.3], [93, 88, -0.3]].forEach(([hx, hy, a]) => { x.beginPath(); x.ellipse(hx, hy, 7, 5, a, 0, 7); x.fill(); });
+    const d = x.getImageData(0, 0, W, H).data, r = UI.rng(23), rgb = [], gray = [];
+    for (let y = 0; y < H; y++) {
+      const r1 = [], g1 = [];
+      for (let i = 0; i < W; i++) {
+        const k = (y * W + i) * 4, p = [0, 1, 2].map(ch => Math.max(0, Math.min(255, Math.round(d[k + ch] + (r() - 0.5) * 10))));
+        r1.push(p); g1.push(Math.round(0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]));
+      }
+      rgb.push(r1); gray.push(g1);
+    }
+    return { rgb, gray, w: W, h: H };
+  }
+  APP.mod({
+    id: 'backproj', ch: '2', num: '2.2.3', title: '히스토그램 역투영과 얼굴 검출', src: '2강 p.18–22 · 알고리즘 2-2·2-3, 식 (2.4), 그림 2-12·2-13', star: true,
+    blurb: 'HS 2차원 히스토그램 → 비율 히스토그램 min(ĥm/ĥi, 1) → 화소마다 칸을 찾아 신뢰도로 바꾸기.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '히스토그램 역투영은 <b>히스토그램을 매핑 함수로</b> 써서 화소 값을 “얼굴일 신뢰도”로 바꿉니다. 모델 얼굴의 색(H, S)을 q×q 칸으로 세어 ĥ<sub>m</sub>을 만들고, 검출할 영상 전체의 ĥ<sub>i</sub>로 나눈 <b>비율 히스토그램</b> h<sub>r</sub>을 씁니다. 나누면 영상 전체에 흔한 색은 점수가 깎이고, 얼굴에 특징적인 색은 올라갑니다. 비율은 1을 넘을 수 있으므로 <b>min(·, 1.0)</b>으로 잘라 0~1 신뢰도로 만듭니다. 입력 영상에서 드래그해 모델 영역을 다시 고르고, 화소나 히스토그램 칸 위에 마우스를 올려 보세요.',
+        formulas: [
+          [R`$$\hat h(j,i)=\frac{h(j,i)}{M\times N},\quad 0\le j,i\le q-1$$`, '알고리즘 2-2 · 정규화'],
+          [R`$$h_r(j,i)=\min\!\left(\frac{\hat h_m(j,i)}{\hat h_i(j,i)},\;1.0\right),\quad 0\le j,i\le q-1$$`, '식 (2.4) 비율 히스토그램'],
+          [R`$$o(j,i)=\hat h_r\big(\mathrm{quantize}(g_H(j,i)),\,\mathrm{quantize}(g_S(j,i))\big)$$`, '알고리즘 2-3 · 역투영'],
+        ],
+      });
+
+      // ---------- whole-image demo ----------
+      let src = 'face', q = 16, disp = 'r', theta = 0.5, rect = { x: 72, y: 33, w: 17, h: 21 }, hov = null, hovBin = null, FACE = null, D = null;
+      const getImg = () => (src === 'face' ? FACE || (FACE = bpScene()) : UI.currentImage());
+      function compute() {
+        const img = getImg(), H = img.rgb.length, W = img.rgb[0].length;
+        rect.x = CV.clamp(rect.x, 0, W - 1); rect.y = CV.clamp(rect.y, 0, H - 1);
+        rect.w = CV.clamp(rect.w, 1, W - rect.x); rect.h = CV.clamp(rect.h, 1, H - rect.y);
+        if (!img._hs) img._hs = img.rgb.map(r => r.map(bpHS));
+        const bins = img._hs.map(r => r.map(([hh, s]) => bpQ(hh, s, q)));
+        const hm = CV.zeros(q, q), hi = CV.zeros(q, q);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const [a, b] = bins[y][x]; hi[a][b]++;
+          if (y >= rect.y && y < rect.y + rect.h && x >= rect.x && x < rect.x + rect.w) hm[a][b]++;
+        }
+        const nm = rect.w * rect.h, N = H * W;
+        const Hm = hm.map(r => r.map(v => v / nm)), Hi = hi.map(r => r.map(v => v / N));
+        const Rt = Hm.map((r, a) => r.map((v, b) => (Hi[a][b] > 0 ? v / Hi[a][b] : 0))), Hr = Rt.map(r => r.map(v => Math.min(v, 1)));
+        const mHm = Math.max(1e-12, ...Hm.flat()), mR = Math.max(1e-12, ...Rt.flat());
+        const val = (a, b) => (disp === 'r' ? Hr[a][b] : disp === 'm' ? Hm[a][b] / mHm : Rt[a][b] / mR);
+        const O = bins.map(r => r.map(([a, b]) => val(a, b)));
+        D = { img, H, W, bins, hm, hi, Hm, Hi, Rt, Hr, O, nm, N, mHm, mR };
+        if (hovBin && (hovBin[0] >= q || hovBin[1] >= q)) { hovBin = null; hov = null; }
+        if (hov) hovBin = bins[hov[0]] && bins[hov[0]][hov[1]] ? bins[hov[0]][hov[1]] : null;
+      }
+      const ivIn = UI.ImageView({ caption: '입력 영상' }), ivO = UI.ImageView({ caption: '' }), ivB = UI.ImageView({ caption: '' });
+      const cvM = h('canvas'), cvI = h('canvas'), cvR = h('canvas');
+      [cvM, cvI, cvR].forEach(cv => Object.assign(cv.style, { width: '100%', height: 'auto', imageRendering: 'pixelated', borderRadius: '6px', border: '1px solid var(--rule)', display: 'block', cursor: 'crosshair', touchAction: 'none' }));
+      const look = h('div', { class: 'note' });
+      const barCv = h('canvas'), tblBox = h('div'), clipInfo = h('p', { class: 'caption' });
+      function lookup() {
+        if (!hovBin) { look.innerHTML = '입력 영상이나 역투영 영상 위에 마우스를 올리면 그 화소가 <b>어느 칸을 찾아가서 어떤 값을 받는지</b> 보여 줍니다. 같은 칸에 속한 화소는 모두 하늘색으로 표시됩니다. 히스토그램 칸 위에 올려도 됩니다.'; return; }
+        const [a, b] = hovBin, { Hm, Hi, Rt, Hr, hm, hi } = D;
+        let s = '';
+        if (hov) { const [y, x] = hov, p = D.img.rgb[y][x], [hh, sat] = D.img._hs[y][x]; s += `화소 (${y}, ${x}) RGB (${p.map(Math.round).join(', ')}) → H = ${hh.toFixed(1)}°, S = ${sat.toFixed(3)} → quantize → 칸 <b>(${a}, ${b})</b><br>`; }
+        else s += `칸 <b>(${a}, ${b})</b>: H ${(a * 360 / q).toFixed(1)}°~${((a + 1) * 360 / q).toFixed(1)}°, S ${(b / q).toFixed(3)}~${((b + 1) / q).toFixed(3)}<br>`;
+        s += `모델 ${hm[a][b]}화소 ÷ ${D.nm} → ĥm = ${Hm[a][b].toFixed(4)} · 영상 ${hi[a][b]}화소 ÷ ${D.N} → ĥi = ${Hi[a][b].toFixed(4)}<br>`;
+        if (Hi[a][b] > 0) {
+          const r = Rt[a][b];
+          s += `ĥm / ĥi = ${r.toFixed(3)} → min(${r.toFixed(3)}, 1.0) = <b>${Hr[a][b].toFixed(3)}</b>` + (r > 1 ? ' <span class="pill hot">1을 넘어 잘림</span>' : '') + (hov && disp === 'r' ? ` = o(${hov[0]}, ${hov[1]})` : '');
+          if (disp !== 'r' && hov) s += `<br>지금 표시 방식에서는 o(${hov[0]}, ${hov[1]}) = ${D.O[hov[0]][hov[1]].toFixed(3)} (${disp === 'm' ? 'ĥm ÷ 최댓값' : '(ĥm/ĥi) ÷ 최댓값'})`;
+        } else s += 'ĥi = 0 → 이 영상에 없는 색이라 역투영에 쓰이지 않습니다.';
+        look.innerHTML = s;
+      }
+      function minCard() {
+        const { hm, Hm, Hi, Rt, Hr, N, nm } = D, list = [];
+        for (let a = 0; a < q; a++) for (let b = 0; b < q; b++) if (hm[a][b]) list.push({ a, b, c: hm[a][b] });
+        list.sort((p, r) => r.c - p.c);
+        const top = list.slice(0, 8), rs = top.map(t => Rt[t.a][t.b]);
+        const yMax = Math.max(1.3, Math.min(8, Math.max(0, ...rs))) * 1.08;
+        UI.plot(barCv, {
+          w: 400, h: 200, x: [-0.5, top.length - 0.5], y: [0, yMax], xticks: top.map((_, k) => k), xfmt: k => (top[k] ? `${top[k].a},${top[k].b}` : ''),
+          series: [{ type: 'bar', data: rs, color: '--faint', frac: 0.62, alpha: 0.45 }, { type: 'bar', data: rs.map(v => Math.min(v, 1)), color: '--orange', frac: 0.62 }, { type: 'line', data: [[-0.5, 1], [top.length - 0.5, 1]], color: '--bad', width: 1.5, dash: [5, 4] }],
+          legend: [['ĥm/ĥi', '--faint'], ['min(·, 1)', '--orange']],
+        });
+        tblBox.replaceChildren(UI.dataTable(['칸 (H,S)', '모델 화소', 'ĥm', 'ĥi', 'ĥm/ĥi', 'ĥr'], top.map(t => [`(${t.a},${t.b})`, t.c, Hm[t.a][t.b].toFixed(4), Hi[t.a][t.b].toFixed(4), Rt[t.a][t.b].toFixed(2), Hr[t.a][t.b].toFixed(2)])));
+        const clipped = list.filter(t => Rt[t.a][t.b] > 1).length;
+        clipInfo.textContent = `가로축 = 모델에 많이 나온 칸 (H칸, S칸). 모델에 나온 칸 ${list.length}개 중 ${clipped}개가 1을 넘어 1.0으로 잘렸습니다. 모델 영역 안에만 있는 색이면 비율이 N ÷ (모델 화소 수) = ${N} ÷ ${nm} ≈ ${(N / nm).toFixed(1)}까지 커집니다(그래프 위로 넘친 막대).`;
+      }
+      function redraw() {
+        const { img, bins, O, Hm, Hi, Hr, H, W } = D, marks = [];
+        if (hovBin) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bins[y][x][0] === hovBin[0] && bins[y][x][1] === hovBin[1]) marks.push({ y, x, color: '#19d3ff' });
+        ivIn.draw(img.rgb, 'rgb', { rects: [{ x: rect.x, y: rect.y, ww: rect.w, hh: rect.h, color: '--orange', w: 1.5 }], marks });
+        ivO.draw(O.map(r => r.map(v => v * 255)), 'gray', { marks });
+        ivB.draw(O.map(r => r.map(v => (v > theta ? 1 : 0))), 'binary', { dark: true });
+        ivO.setCaption(disp === 'r' ? '역투영 o = ĥr(칸) · 식 (2.4)' : disp === 'm' ? 'ĥm(칸) ÷ 최댓값 · 나누지 않음' : '(ĥm/ĥi)(칸) ÷ 최댓값 · min 없음');
+        ivB.setCaption(`o > ${theta.toFixed(2)}인 화소`);
+        ivIn.setInfo(`모델 ${rect.w}×${rect.h}`);
+        bpHeat(cvM, Hm, { sqrt: true, hl: hovBin }); bpHeat(cvI, Hi, { sqrt: true, hl: hovBin }); bpHeat(cvR, Hr, { max: 1, hl: hovBin });
+        lookup(); minCard();
+      }
+      const run = () => { compute(); redraw(); };
+      let raf = 0;
+      const sched = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; redraw(); }); };
+      const posOf = (cv, e) => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientY - r.top) / r.height * cv.height), Math.floor((e.clientX - r.left) / r.width * cv.width)]; };
+      const setHov = (y, x) => { if (!D || y < 0 || x < 0 || y >= D.H || x >= D.W) return; hov = [y, x]; hovBin = D.bins[y][x]; sched(); };
+      let drag = null, prevRect = null;
+      Object.assign(ivIn.canvas.style, { cursor: 'crosshair', touchAction: 'none' });
+      ivIn.canvas.addEventListener('pointerdown', e => { const [y, x] = posOf(ivIn.canvas, e); drag = [y, x]; prevRect = { ...rect }; ivIn.canvas.setPointerCapture(e.pointerId); });
+      ivIn.canvas.addEventListener('pointermove', e => {
+        const [y, x] = posOf(ivIn.canvas, e);
+        if (!drag) return setHov(y, x);
+        const yy = CV.clamp(y, 0, D.H - 1), xx = CV.clamp(x, 0, D.W - 1);
+        rect = { x: Math.min(xx, drag[1]), y: Math.min(yy, drag[0]), w: Math.abs(xx - drag[1]) + 1, h: Math.abs(yy - drag[0]) + 1 };
+        compute(); sched();
+      });
+      ivIn.canvas.addEventListener('pointerup', e => {
+        if (!drag) return;
+        drag = null;
+        if (rect.w * rect.h < 4) rect = prevRect; // a click, not a drag
+        compute(); redraw();
+        setHov(...posOf(ivIn.canvas, e));
+      });
+      [ivO, ivB].forEach(iv => iv.canvas.addEventListener('pointermove', e => setHov(...posOf(iv.canvas, e))));
+      [ivIn, ivO, ivB].forEach(iv => iv.canvas.addEventListener('pointerleave', () => { if (drag) return; hov = null; hovBin = null; sched(); }));
+      [cvM, cvI, cvR].forEach(cv => {
+        cv.addEventListener('pointermove', e => {
+          const r = cv.getBoundingClientRect(), b = Math.floor((e.clientX - r.left) / r.width * q), a = Math.floor((e.clientY - r.top) / r.height * q);
+          if (a >= 0 && b >= 0 && a < q && b < q && (!hovBin || hov || hovBin[0] !== a || hovBin[1] !== b)) { hov = null; hovBin = [a, b]; sched(); }
+        });
+        cv.addEventListener('pointerleave', () => { hovBin = null; sched(); });
+      });
+      function resetRect() {
+        if (src === 'face') { rect = { x: 72, y: 33, w: 17, h: 21 }; return; }
+        const img = getImg(), H = img.rgb.length, W = img.rgb[0].length;
+        rect = { x: Math.round(W * 0.4), y: Math.round(H * 0.35), w: Math.max(2, Math.round(W * 0.2)), h: Math.max(2, Math.round(H * 0.25)) };
+      }
+      const picker = UI.imagePicker(); picker.hidden = true;
+      const srcSeg = UI.segmented([['face', '합성 얼굴 장면'], ['shared', '공용 실습 영상 / 내 사진']], src, v => { src = v; picker.hidden = v !== 'shared'; hov = hovBin = null; resetRect(); run(); }, '영상');
+      const qSeg = UI.segmented([[8, '8'], [16, '16'], [32, '32'], [64, '64']], q, v => { q = v; hovBin = null; run(); }, '양자화 q');
+      const dSeg = UI.segmented([['r', 'min(ĥm/ĥi, 1)'], ['m', 'ĥm만'], ['raw', 'ĥm/ĥi (min 없음)']], disp, v => { disp = v; run(); }, '역투영 값');
+      const thSl = UI.slider({ label: '이진화 θ', min: 0.05, max: 0.95, step: 0.05, value: theta, id: 'bp-th', fmt: v => v.toFixed(2), oninput: v => { theta = v; redraw(); } });
+      UI.onImage(() => { if (src === 'shared' && root.isConnected) { hov = hovBin = null; resetRect(); run(); } });
+      const cM = h('input', { type: 'number', step: '0.01', min: 0, value: 0.3, style: { width: '84px' }, id: 'bp-cm', 'aria-label': 'ĥm' });
+      const cI = h('input', { type: 'number', step: '0.01', min: 0, value: 0.05, style: { width: '84px' }, id: 'bp-ci', 'aria-label': 'ĥi' });
+      const cOut = h('div', { class: 'mono', style: { marginTop: '6px' } });
+      const calc = () => { const a = +cM.value || 0, b = +cI.value || 0; cOut.innerHTML = b > 0 ? `${a} ÷ ${b} = ${(a / b).toFixed(3)} → min(${(a / b).toFixed(3)}, 1.0) = <b>${Math.min(1, a / b).toFixed(3)}</b>` : 'ĥi = 0이면 그 색은 영상에 없으므로 계산에 쓰이지 않습니다.'; };
+      [cM, cI].forEach(i => i.addEventListener('input', calc));
+      const heatCol = (cv, t, cap) => h('div', { class: 'col', style: { flex: '1 1 170px', maxWidth: '250px' } }, h('b', { style: { fontSize: '13px' } }, t), cv, h('span', { class: 'caption' }, cap));
+      const bigCard = h('div', { class: 'card' },
+        h('div', { class: 'controls' }, UI.labeled('영상', srcSeg), picker, UI.labeled('양자화 q', qSeg)),
+        h('div', { class: 'controls', style: { marginTop: '8px' } }, UI.labeled('역투영 값', dSeg), thSl, h('span', { class: 'caption' }, '입력 영상에서 드래그 = 모델 영역(주황 사각형) 다시 고르기')),
+        h('div', { class: 'imgs', style: { marginTop: '10px' } }, ivIn.el, ivO.el, ivB.el),
+        h('div', { style: { marginTop: '10px' } }, look));
+      const heatCard = h('div', { class: 'card' }, h('h3', {}, 'HS 2차원 히스토그램', h('small', {}, '그림 2-12(b) · 세로 = H 칸 j (0°→360°), 가로 = S 칸 i (0→1)')),
+        h('div', { class: 'row' }, heatCol(cvM, 'ĥm · 모델 얼굴', '밝기 = √값 (작은 값도 보이게)'), heatCol(cvI, 'ĥi · 입력 영상 전체', '밝기 = √값'), heatCol(cvR, 'ĥr = min(ĥm/ĥi, 1)', '밝기 = 값 그대로 (0~1)')),
+        h('p', { class: 'caption' }, 'ĥm에서 밝은 칸이 얼굴 색입니다. ĥi에서도 밝은 칸(영상 전체에 흔한 색)은 나눗셈 뒤 ĥr에서 어두워집니다. q를 8로 줄이면 칸이 넓어져 바위의 잡음 색까지 얼굴 칸에 들어가 배경에 흰 점이 늘어납니다. 64로 늘리면 칸이 잘게 쪼개져, 모델과 조금만 다른 색(나무 상자)은 칸이 어긋나 점점이 끊깁니다.'));
+      const tryNote = h('div', { class: 'note', html: '해 볼 것 — <b>나눗셈의 효과</b>: 모델 영역을 헬멧 위 바위까지 넓게 드래그한 뒤 “ĥm만”과 “min(ĥm/ĥi, 1)”을 번갈아 보세요. ĥm만 쓰면 모델에 섞인 바위색이 얼굴만큼 밝아지지만, 나누면 영상 전체에 흔한 바위색이 깎여 얼굴이 두드러집니다. 반대로 모델이 깨끗할 때는 나눗셈이 모델에 몇 화소 섞인 드문 색(바위의 잡음 점)까지 1로 끌어올리는 부작용도 보입니다.' });
+      const limitNote = h('div', { class: 'note warn', html: '그림 2-13처럼 얼굴뿐 아니라 <b>손</b>도 높은 값을 받습니다 — 히스토그램은 색만 세고 모양은 모르기 때문입니다. 비슷한 색 분포를 가진 다른 물체(여기서는 나무 상자)도 구별하지 못하고, 검출 대상이 여러 색으로 이루어져 있으면 오류가 생길 수 있습니다. 반대로 위치 정보를 버리므로 <b>이동·회전에 불변</b>이고 <b>가림(occlusion)에 강인</b>해서, 배경을 조정할 수 있는 상황에 적합합니다.' });
+      const minEl = h('div', { class: 'card' }, h('h3', {}, '왜 min(·, 1.0)을 쓰나', h('small', {}, '모델에 많이 나온 칸 상위 8개')), barCv, clipInfo, tblBox,
+        h('div', { class: 'note', style: { marginTop: '10px' }, html: '<b>나눗셈</b>은 영상 전체에 흔한 색의 점수를 깎습니다(확률로 보면 P(얼굴|색) ∝ P(색|얼굴) / P(색)). 그런데 ĥi가 작은 칸은 비율이 몇 배, 몇십 배로 커집니다. <b>min</b>으로 1에서 자르면 ① 신뢰도가 0~1 범위에 머물고 ② 드문 색 한두 칸이 결과를 독차지하지 못하며 ③ 분모가 작은 칸의 불안정한 값이 결과를 흔들지 못합니다. 위의 “역투영 값”을 <b>ĥm/ĥi (min 없음)</b>으로 바꾸면 드문 색 몇 칸이 최댓값이 되어 얼굴 대부분이 어두워지는 것을 볼 수 있습니다.' }),
+        h('div', { class: 'controls', style: { marginTop: '10px' } }, h('b', { style: { fontSize: '13px' } }, '직접 계산'), UI.labeled('ĥm', cM), UI.labeled('ĥi', cI)), cOut);
+
+      // ---------- tiny step-through ----------
+      const TQ = 4, TM = 8, TN = 8;
+      const parseEx = () => BP_EX.trim().split('\n').map(r => r.trim().split(/\s+/));
+      let tImg = parseEx(), tRect = { y: 1, x: 1, h: 4, w: 5 }, tool = 'rect', brush = 'F', fr0 = null, anchor = null;
+      const tBin = ty => bpQ(...bpHS(BP_TYPES[ty][1]), TQ);
+      const CODE = [
+        '// 알고리즘 2-2 : 2차원 히스토그램 계산 (먼저 모델 영역에 적용 → ĥ_m)',
+        'h(j,i), 0≤j,i≤q-1 을 0으로 초기화한다.',
+        'for(j=0 to M-1)',
+        '  for(i=0 to N-1)   // 화소 (j,i) 각각에 대해',
+        '    h(quantize(f_H(j,i)), quantize(f_S(j,i)))++;   // 해당 칸을 1 증가',
+        'for(j=0 to q-1)',
+        '  for(i=0 to q-1)',
+        '    ĥ(j,i) = h(j,i)/(M×N);   // 정규화',
+        '',
+        '// 알고리즘 2-3 : 히스토그램 역투영',
+        '영상 g_H, g_S에 [알고리즘 2-2]를 적용하여 정규 히스토그램 ĥ_i를 만든다.',
+        '식 (2.4)를 이용하여 ĥ_r을 구한다.   // ĥ_r = min(ĥ_m/ĥ_i, 1.0)',
+        'for(j=0 to M-1)',
+        '  for(i=0 to N-1)',
+        '    o(j,i) = ĥ_r(quantize(g_H(j,i)), quantize(g_S(j,i)));   // 역투영',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '알고리즘 2-2 → 식 (2.4) → 알고리즘 2-3', render: fr => { fr0 = fr; tDraw(); } });
+      const inR = (y, x) => y >= tRect.y && y < tRect.y + tRect.h && x >= tRect.x && x < tRect.x + tRect.w;
+      const lum = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+      const ovr = () => [{ type: 'rect', pts: [tRect.y, tRect.x, tRect.h, tRect.w], color: '--orange', w: 3, dash: true }];
+      const gImg = UI.GridView({
+        rows: TM, cols: TN, cs: 36, fs: 10.5, label: '입력 영상 g',
+        cell: (y, x) => {
+          const ty = tImg[y][x], c = BP_TYPES[ty][1], [a, b] = tBin(ty);
+          const s = { t: `${a},${b}`, bg: `rgb(${c.join(',')})`, color: lum(c) < 130 ? '#fff' : '#111', title: `${BP_TYPES[ty][0]} RGB(${c.join(', ')}) → 칸 (${a}, ${b})` };
+          if (fr0 && fr0.cur && fr0.cur[0] === y && fr0.cur[1] === x) s.cls = 'cur';
+          else if (fr0 && fr0.bin && ['mn', 'in', 'r'].includes(fr0.ph) && a === fr0.bin[0] && b === fr0.bin[1] && (fr0.ph !== 'mn' || inR(y, x))) s.cls = 'win';
+          return s;
+        },
+        paint: {
+          start: (y, x) => { if (tool === 'rect') { anchor = [y, x]; return 'rect'; } return brush; },
+          apply: (y, x, v) => {
+            if (v === 'rect') tRect = { y: Math.min(y, anchor[0]), x: Math.min(x, anchor[1]), h: Math.abs(y - anchor[0]) + 1, w: Math.abs(x - anchor[1]) + 1 };
+            else tImg[y][x] = v;
+            gImg.draw(); gImg.overlay(ovr());
+            clearTimeout(gImg.t); gImg.t = setTimeout(tBuild, 150);
+          },
+        },
+      });
+      const binLbl = { rowLabels: [...Array(TQ).keys()].map(a => 'H' + a), colLabels: [...Array(TQ).keys()].map(b => 'S' + b) };
+      const isCur = (a, b, g) => fr0 && fr0.bin && fr0.grid === g && fr0.bin[0] === a && fr0.bin[1] === b;
+      const tint = (v, max) => `color-mix(in srgb, var(--orange) ${Math.round(Math.min(1, v / max) * 55)}%, var(--cell-bg))`;
+      const histCell = (cnt, nrm, tot, g) => (a, b) => {
+        if (!fr0 || !fr0[cnt]) return { t: '' };
+        const c = fr0[cnt][a][b], nv = fr0[nrm][a][b];
+        const s = nv !== null ? { t: nv.toFixed(2), sub: `${c}/${fr0[tot]}` } : { t: String(c), color: c ? '' : 'var(--faint)' };
+        if (c) s.bg = tint(c, fr0[tot] * 0.6);
+        if (isCur(a, b, g)) s.cls = 'cur';
+        return s;
+      };
+      const gHm = UI.GridView({ rows: TQ, cols: TQ, cs: 54, fs: 12, ...binLbl, label: 'ĥm', cell: histCell('hm', 'hmN', 'nm', 'm') });
+      const gHi = UI.GridView({ rows: TQ, cols: TQ, cs: 54, fs: 12, ...binLbl, label: 'ĥi', cell: histCell('hi', 'hiN', 'N', 'i') });
+      const gHr = UI.GridView({
+        rows: TQ, cols: TQ, cs: 54, fs: 12, ...binLbl, label: 'ĥr',
+        cell: (a, b) => {
+          if (!fr0 || !fr0.hr || fr0.hr[a][b] === null) return { t: '' };
+          const v = fr0.hr[a][b], r = fr0.rt[a][b];
+          const s = { t: v.toFixed(2), sub: r === null ? '' : '÷ ' + r.toFixed(2), bg: v ? tint(v, 1) : '' };
+          if (r !== null && r > 1) { s.badge = '✂'; s.badgeColor = 'var(--bad)'; }
+          if (!v) s.color = 'var(--faint)';
+          if (isCur(a, b, 'r')) s.cls = 'cur';
+          return s;
+        },
+      });
+      const gO = UI.GridView({
+        rows: TM, cols: TN, cs: 36, fs: 10.5, label: '역투영 o',
+        cell: (y, x) => {
+          if (!fr0 || !fr0.o || fr0.o[y][x] === null) return { t: '' };
+          const v = fr0.o[y][x], g = Math.round(35 + v * 215);
+          return { t: v.toFixed(2), bg: `rgb(${g},${g},${g})`, color: g < 140 ? '#fff' : '#111', cls: fr0.ph === 'o' && fr0.cur && fr0.cur[0] === y && fr0.cur[1] === x ? 'cur' : '' };
+        },
+      });
+      function tDraw() { gImg.draw(); gImg.overlay(ovr()); gHm.draw(); gHi.draw(); gHr.draw(); gO.draw(); }
+      function tBuild() {
+        const fr = [], nm = tRect.w * tRect.h, N = TM * TN;
+        const Z = () => CV.zeros(TQ, TQ), NUL = () => Array.from({ length: TQ }, () => new Array(TQ).fill(null));
+        const hm = Z(), hmN = NUL(), hi = Z(), hiN = NUL(), rt = NUL(), hr = NUL(), o = Array.from({ length: TM }, () => new Array(TN).fill(null));
+        const snap = x => fr.push({ hm: CV.clone(hm), hmN: CV.clone(hmN), hi: CV.clone(hi), hiN: CV.clone(hiN), rt: CV.clone(rt), hr: CV.clone(hr), o: CV.clone(o), nm, N, ...x });
+        snap({ ph: 'init', line: 2, vars: { q: TQ, '모델 M×N': `${tRect.h}×${tRect.w}=${nm}` }, note: `먼저 모델 영역(주황 점선, ${tRect.h}×${tRect.w} = ${nm}화소)에 알고리즘 2-2를 적용해 ĥ<sub>m</sub>을 만듭니다. q = ${TQ}이므로 H는 90°씩, S는 0.25씩 네 칸으로 나눕니다.` });
+        for (let y = tRect.y; y < tRect.y + tRect.h; y++) for (let x = tRect.x; x < tRect.x + tRect.w; x++) {
+          const ty = tImg[y][x], [hh, s] = bpHS(BP_TYPES[ty][1]), [a, b] = bpQ(hh, s, TQ);
+          hm[a][b]++;
+          snap({ ph: 'm', grid: 'm', cur: [y, x], bin: [a, b], line: [4, 5], vars: { j: y - tRect.y, i: x - tRect.x, f_H: hh.toFixed(1) + '°', f_S: s.toFixed(3), quantize: `(${a}, ${b})`, [`h_m(${a},${b})`]: hm[a][b] },
+            note: `모델 화소 (${y},${x}) · ${BP_TYPES[ty][0]}: H = ${hh.toFixed(1)}°, S = ${s.toFixed(3)} → quantize → 칸 <b>(${a}, ${b})</b> → h<sub>m</sub>(${a},${b}): ${hm[a][b] - 1} → <b>${hm[a][b]}</b>` });
+        }
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) {
+          if (!hm[a][b]) continue;
+          hmN[a][b] = hm[a][b] / nm;
+          snap({ ph: 'mn', grid: 'm', bin: [a, b], line: 8, vars: { j: a, i: b, [`h_m(${a},${b})`]: hm[a][b], 'M×N': nm, [`ĥ_m(${a},${b})`]: hmN[a][b] }, note: `ĥ<sub>m</sub>(${a},${b}) = ${hm[a][b]} / ${nm} = <b>${hmN[a][b].toFixed(3)}</b> — 모델 화소 중 이 색의 비율 (분모는 <b>모델</b> 화소 수)` });
+        }
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) if (hmN[a][b] === null) hmN[a][b] = 0;
+        for (let y = 0; y < TM; y++) for (let x = 0; x < TN; x++) {
+          const ty = tImg[y][x], [hh, s] = bpHS(BP_TYPES[ty][1]), [a, b] = bpQ(hh, s, TQ);
+          hi[a][b]++;
+          snap({ ph: 'i', grid: 'i', cur: [y, x], bin: [a, b], line: [11, 5], vars: { j: y, i: x, g_H: hh.toFixed(1) + '°', g_S: s.toFixed(3), quantize: `(${a}, ${b})`, [`h_i(${a},${b})`]: hi[a][b] },
+            note: `입력 영상 전체에 알고리즘 2-2 적용 · 화소 (${y},${x}) ${BP_TYPES[ty][0]} → 칸 <b>(${a}, ${b})</b> → h<sub>i</sub>(${a},${b}) = <b>${hi[a][b]}</b>` });
+        }
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) {
+          if (!hi[a][b]) continue;
+          hiN[a][b] = hi[a][b] / N;
+          snap({ ph: 'in', grid: 'i', bin: [a, b], line: [11, 8], vars: { j: a, i: b, [`h_i(${a},${b})`]: hi[a][b], 'M×N': N, [`ĥ_i(${a},${b})`]: hiN[a][b] }, note: `ĥ<sub>i</sub>(${a},${b}) = ${hi[a][b]} / ${N} = <b>${hiN[a][b].toFixed(3)}</b> — 영상 전체에서 이 색의 비율` });
+        }
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) if (hiN[a][b] === null) hiN[a][b] = 0;
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) {
+          if (!hi[a][b]) { rt[a][b] = null; hr[a][b] = 0; continue; }
+          const r = hmN[a][b] / hiN[a][b]; rt[a][b] = r; hr[a][b] = Math.min(r, 1);
+          const why = r > 1 ? `비율이 1을 넘으므로 <b>1.0으로 잘립니다</b> — 영상 전체보다 모델에서 훨씬 흔한, 얼굴다운 색입니다.` : r > 0 ? '1보다 작아 그대로 씁니다 — 모델에도 있지만 영상 전체(배경)에 더 흔한 색이라 점수가 깎였습니다.' : '모델에 없는 색이라 0입니다.';
+          snap({ ph: 'r', grid: 'r', bin: [a, b], line: 12, vars: { j: a, i: b, [`ĥ_m(${a},${b})`]: hmN[a][b], [`ĥ_i(${a},${b})`]: hiN[a][b], 'ĥ_m/ĥ_i': r, [`ĥ_r(${a},${b})`]: hr[a][b] },
+            note: `ĥ<sub>r</sub>(${a},${b}) = min(${hmN[a][b].toFixed(3)} / ${hiN[a][b].toFixed(3)}, 1.0) = min(${r.toFixed(3)}, 1.0) = <b>${hr[a][b].toFixed(3)}</b>. ${why}` });
+        }
+        for (let a = 0; a < TQ; a++) for (let b = 0; b < TQ; b++) if (hr[a][b] === null) hr[a][b] = 0;
+        for (let y = 0; y < TM; y++) for (let x = 0; x < TN; x++) {
+          const ty = tImg[y][x], [a, b] = tBin(ty);
+          o[y][x] = hr[a][b];
+          snap({ ph: 'o', grid: 'r', cur: [y, x], bin: [a, b], line: [14, 15], vars: { j: y, i: x, quantize: `(${a}, ${b})`, 'o(j,i)': o[y][x] },
+            note: `화소 (${y},${x}) ${BP_TYPES[ty][0]} → 칸 (${a}, ${b})를 찾아가 ĥ<sub>r</sub> 값을 그대로 가져옴: o(${y},${x}) = <b>${o[y][x].toFixed(2)}</b>` + (!inR(y, x) && o[y][x] >= 1 ? ' — 모델 영역 밖인데도 최고점입니다(같은 색이라 구별 못함).' : '') });
+        }
+        const hot = []; for (let y = 0; y < TM; y++) for (let x = 0; x < TN; x++) if (o[y][x] >= 0.999 && !inR(y, x) && !'FLE'.includes(tImg[y][x])) hot.push(`(${y},${x}) ${BP_TYPES[tImg[y][x]][0]}`);
+        snap({ ph: 'end', line: [], vars: {}, note: `완료. o가 1.00인 화소가 얼굴 후보입니다.` + (hot.length ? ` 얼굴이 아닌데도 1.00을 받은 화소: ${hot.join(', ')} — 그림 2-13에서 손이 함께 밝게 나온 것과 같은 한계입니다.` : '') });
+        st.load(fr, fr0 ? Math.min(st.i, fr.length - 1) : fr.length - 1);
+      }
+      const brushSeg = UI.segmented(Object.entries(BP_TYPES).map(([k, [n]]) => [k, n]), brush, v => (brush = v), '색');
+      const brushBox = h('span', { class: 'ctl' }, h('span', {}, '칠할 색'), brushSeg); brushBox.hidden = true;
+      const toolSeg = UI.segmented([['rect', '모델 영역 드래그'], ['paint', '색 칠하기']], tool, v => { tool = v; brushBox.hidden = v !== 'paint'; }, '도구');
+      const legend = h('div', { class: 'legend', style: { marginTop: '8px' } }, Object.entries(BP_TYPES).map(([k, [n, c]]) => h('span', {}, h('i', { style: { background: `rgb(${c.join(',')})` } }), `${n} → 칸 (${tBin(k).join(',')})`)));
+      const capCol = (cap, el) => h('div', { class: 'col', style: { maxWidth: '330px' } }, h('span', { class: 'caption' }, cap), el);
+      const tinyLab = h('div', { class: 'lab wide-code' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' },
+            h('div', { class: 'controls' }, UI.labeled('도구', toolSeg), brushBox, h('button', { class: 'btn', onclick: () => { tImg = parseEx(); tRect = { y: 1, x: 1, h: 4, w: 5 }; tBuild(); } }, '처음 예제로')),
+            legend,
+            h('div', { class: 'row', style: { marginTop: '10px' } },
+              capCol('입력 g — 칸 글자 = 양자화된 (H칸, S칸) · 주황 점선 = 모델 영역', gImg.el),
+              capCol('역투영 결과 o (밝을수록 얼굴일 가능성 높음)', gO.el))),
+          h('div', { class: 'card' },
+            h('div', { class: 'row' },
+              capCol('ĥm · 모델 — 작은 글씨 = 개수 / 모델 화소 수', gHm.el),
+              capCol('ĥi · 영상 전체 — 작은 글씨 = 개수 / 64', gHi.el),
+              capCol('ĥr = min(ĥm/ĥi, 1) — 작은 글씨 = 나눗셈 결과, ✂ = 1에서 잘림', gHr.el))),
+          st.root,
+          h('div', { class: 'note', html: '처음 예제에서 볼 것: 모델 영역에 바위·눈 화소가 섞여 칸 (0,0)의 ĥm은 0.20이지만, 영상 전체에 바위·옷이 많아 ĥi가 커서 ĥr은 0.46으로 깎입니다. 반대로 얼굴 피부 (0,1)과 입술 (3,1)은 비율이 1을 넘어 1.00으로 잘립니다. 모델에 넣지 않은 <b>손</b>(6행)도 같은 칸이라 1.00을 받습니다.' })),
+        h('div', { class: 'stack' }, st.panel));
+
+      root.append(
+        h('div', { class: 'lab' }, h('div', { class: 'stack' }, bigCard, heatCard, tryNote, limitNote), h('div', { class: 'stack' }, minEl)),
+        h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, '한 화소씩: 알고리즘 2-2 → 식 (2.4) → 알고리즘 2-3'),
+        tinyLab);
+      run(); calc(); tBuild();
     },
   });
 
