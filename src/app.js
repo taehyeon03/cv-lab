@@ -32,8 +32,8 @@ const APP = (() => {
       slidebar(),
       h('p', { class: 'lead', html: '각 페이지는 <b>① 강의자료의 수식</b>, <b>② 값을 직접 바꿀 수 있는 시각화</b>, <b>③ 교재 의사 코드와 한 줄씩 맞춰 보는 단계 실행기</b>로 되어 있습니다. 단계 실행기는 Python Tutor처럼 ◀ ▶ 버튼(또는 키보드 ← →)으로 한 단계씩 움직이며, 지금 실행 중인 코드 줄이 노란색으로 표시되고 변수 값과 호출 스택이 함께 바뀝니다. 격자의 숫자는 대부분 클릭해서 바꿀 수 있습니다.' }),
     );
-    for (const ch of ['2', '3']) {
-      root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, ch === '2' ? 'Chapter 2 · 영상처리' : 'Chapter 3 · 에지 검출'));
+    for (const ch of ['2', '3', 'practice']) {
+      root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, ch === '2' ? 'Chapter 2 · 영상처리' : ch === '3' ? 'Chapter 3 · 에지 검출' : '직접 풀어 보기'));
       root.append(h('div', { class: 'intro-grid' }, mods.filter(m => m.ch === ch).map(m => h('a', { href: '#' + m.id }, h('div', { class: 'card' }, h('span', { class: 'n' }, m.num + (m.star ? '  · 단계 실행' : '')), h('b', {}, m.title), h('span', { class: 'caption' }, m.blurb))))));
     }
     root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 그림 3-22, 3-25)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
@@ -41,7 +41,7 @@ const APP = (() => {
 
   function nav() {
     const rail = document.getElementById('rail'), msel = document.getElementById('msel');
-    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출']];
+    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['practice', '문제 풀기']];
     rail.append(h('a', { href: '#', 'data-id': '' }, h('span', { class: 'n' }, '—'), h('span', {}, '개요')));
     msel.append(h('option', { value: '' }, '개요'));
     for (const [ch, label] of groups) {
