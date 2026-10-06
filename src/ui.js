@@ -270,6 +270,40 @@ const UI = (() => {
     return { el, canvas: cv, ctx, draw, setCaption: t => (capL.textContent = t), setInfo: t => (capR.textContent = t), hsl };
   }
 
+  // ---------- Feature view: image scaled up crisply, with vector marks (circles, crosses) on top ----------
+  function FeatView({ caption = '', info = '', width = 480, onClick, onHover } = {}) {
+    const src = ImageView();
+    const cv = h('canvas', { width: 8, height: 8, style: { imageRendering: 'auto' } });
+    const capL = h('span', {}, caption), capR = h('span', { class: 'mono' }, info);
+    const el = h('div', { class: 'iv' }, cv, h('div', { class: 'caption' }, capL, capR));
+    const ctx = cv.getContext('2d');
+    let sc = 1;
+    const pos = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientY - r.top) / r.height * cv.height / sc), Math.floor((e.clientX - r.left) / r.width * cv.width / sc)]; };
+    if (onClick) { cv.style.cursor = 'crosshair'; cv.addEventListener('pointerdown', e => { const [y, x] = pos(e); if (y >= 0 && x >= 0 && y < cv.height / sc && x < cv.width / sc) onClick(y, x, e); }); }
+    if (onHover) cv.addEventListener('pointermove', e => { const [y, x] = pos(e); if (y >= 0 && x >= 0 && y < cv.height / sc && x < cv.width / sc) onHover(y, x); });
+    function draw(arr, mode = 'gray', opt = {}) {
+      src.draw(arr, mode, opt);
+      const H = arr.length, W = arr[0].length;
+      sc = Math.max(1, Math.min(48, Math.round((opt.width || width) / W)));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      if (cv.width !== W * sc * dpr) { cv.width = W * sc * dpr; cv.height = H * sc * dpr; }
+      sc *= dpr;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(src.canvas, 0, 0, cv.width, cv.height);
+      const P = (v) => (v + 0.5) * sc;
+      if (opt.grid && sc >= 12) { ctx.strokeStyle = 'rgba(128,128,128,.35)'; ctx.lineWidth = 1; ctx.beginPath(); for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * sc); ctx.lineTo(cv.width, y * sc); } for (let x = 0; x <= W; x++) { ctx.moveTo(x * sc, 0); ctx.lineTo(x * sc, cv.height); } ctx.stroke(); }
+      for (const m of opt.marks || []) {
+        ctx.strokeStyle = ctx.fillStyle = col(m.color || '--orange'); ctx.lineWidth = (m.w || 2) * dpr;
+        const x = P(m.x), y = P(m.y);
+        if (m.kind === 'cross') { const s = (m.size || 4) * dpr; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.stroke(); }
+        else if (m.kind === 'dot') { ctx.beginPath(); ctx.arc(x, y, (m.size || 3) * dpr, 0, 7); ctx.fill(); }
+        else if (m.kind === 'rect') { ctx.strokeRect(m.x * sc + 1, m.y * sc + 1, m.ww * sc - 2, m.hh * sc - 2); }
+        else { ctx.beginPath(); ctx.arc(x, y, Math.max(2 * dpr, m.r * sc), 0, 7); ctx.stroke(); }
+      }
+    }
+    return { el, canvas: cv, draw, setCaption: t => (capL.textContent = t), setInfo: t => (capR.textContent = t) };
+  }
+
   // ---------- Plot ----------
   function plot(canvas, o) {
     const dpr = window.devicePixelRatio || 1, W = o.w || 520, Hh = o.h || 200;
@@ -418,5 +452,5 @@ const UI = (() => {
   const grayBg = (v, max = 255) => { const t = Math.max(0, Math.min(1, v / max)); const g = Math.round(255 - t * 200); return `rgb(${g},${g},${g})`; };
   const signedBg = (v, amax) => { const t = Math.min(1, Math.abs(v) / (amax || 1)) * 0.55; return v >= 0 ? `color-mix(in srgb, var(--pos) ${t * 100}%, var(--cell-bg))` : `color-mix(in srgb, var(--neg) ${t * 100}%, var(--cell-bg))`; };
 
-  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, matrixEl, dataTable, formula, grayBg, signedBg };
+  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, FeatView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, matrixEl, dataTable, formula, grayBg, signedBg };
 })();

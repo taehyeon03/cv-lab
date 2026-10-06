@@ -307,10 +307,200 @@ const CV = (() => {
     return { h, s, i };
   }
 
+  // ---------- Chapter 4: local feature detection ----------
+  const zget = (f, y, x) => (inside(f, y, x) ? f[y][x] : 0);
+  const mapImg = (f, fn) => f.map((r, y) => r.map((v, x) => fn(v, y, x)));
+
+  // Eq. 4.1 with a (2r+1)² box window w; outside the image counts as 0 (Example 4-1)
+  function moravecS(f, y0, x0, r = 1) {
+    const S = zeros(3, 3);
+    for (let v = -1; v <= 1; v++) for (let u = -1; u <= 1; u++) {
+      let s = 0;
+      for (let y = y0 - r; y <= y0 + r; y++) for (let x = x0 - r; x <= x0 + r; x++) s += (zget(f, y + v, x + u) - zget(f, y, x)) ** 2;
+      S[v + 1][u + 1] = s;
+    }
+    return S;
+  }
+  // Eq. 4.2
+  const moravecC = S => Math.min(S[1][2], S[1][0], S[2][1], S[0][1]);
+  function moravecMap(f, r = 1) { return mapImg(f, (_, y, x) => moravecC(moravecS(f, y, x, r))); }
+
+  // Example 4-2: d_y, d_x with [-1 0 1]ᵀ / [-1 0 1], then G ⊛ products (zero outside)
+  const BOOK_G = [[.0751, .1238, .0751], [.1238, .2042, .1238], [.0751, .1238, .0751]];
+  function gaussKernel2D(sigma) { const g = gaussian1D(sigma); return g.map(a => g.map(b => a * b)); }
+  function harris(f, { G = BOOK_G, k = 0.04, border = 'zero' } = {}) {
+    const g = border === 'zero' ? zget : (a, y, x) => a[clamp(y, 0, H(a) - 1)][clamp(x, 0, W(a) - 1)];
+    const dy = mapImg(f, (_, y, x) => g(f, y + 1, x) - g(f, y - 1, x));
+    const dx = mapImg(f, (_, y, x) => g(f, y, x + 1) - g(f, y, x - 1));
+    const dyy = mapImg(dy, v => v * v), dxx = mapImg(dx, v => v * v), dyx = mapImg(dy, (v, y, x) => v * dx[y][x]);
+    const p = correlate2D(dyy, G, border), q = correlate2D(dxx, G, border), r = correlate2D(dyx, G, border);
+    const C = mapImg(p, (pv, y, x) => pv * q[y][x] - r[y][x] ** 2 - k * (pv + q[y][x]) ** 2);
+    return { dy, dx, dyy, dxx, dyx, p, q, r, C };
+  }
+  // eigenvalues of the symmetric 2×2 [[p r][r q]]
+  function eig2(p, r, q) { const t = (p + q) / 2, d = Math.sqrt(((p - q) / 2) ** 2 + r * r); return [t + d, t - d]; }
+
+  // Eq. 4.11–4.13 on the Gaussian-smoothed image
+  function hessian(f, sigma) {
+    const g = gaussianBlur(f, sigma), h = H(f), w = W(f);
+    const at = (y, x) => g[clamp(y, 0, h - 1)][clamp(x, 0, w - 1)];
+    const dyy = zeros(h, w), dxx = zeros(h, w), dyx = zeros(h, w), det = zeros(h, w), lap = zeros(h, w);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const c = at(y, x);
+      dyy[y][x] = at(y + 1, x) - 2 * c + at(y - 1, x);
+      dxx[y][x] = at(y, x + 1) - 2 * c + at(y, x - 1);
+      dyx[y][x] = (at(y + 1, x + 1) - at(y + 1, x - 1) - at(y - 1, x + 1) + at(y - 1, x - 1)) / 4;
+      det[y][x] = dyy[y][x] * dxx[y][x] - dyx[y][x] ** 2;
+      lap[y][x] = dyy[y][x] + dxx[y][x];
+    }
+    return { g, dyy, dxx, dyx, det, lap };
+  }
+
+  // Fig 4-8: 7×7 circular mask, area 37
+  const SUSAN_MASK = [[0, 0, 1, 1, 1, 0, 0], [0, 1, 1, 1, 1, 1, 0], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [0, 1, 1, 1, 1, 1, 0], [0, 0, 1, 1, 1, 0, 0]];
+  // Eq. 4.14 (pixels outside the image are not counted)
+  function usanArea(f, y0, x0, t1) {
+    let n = 0; const c = f[y0][x0];
+    for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) if (SUSAN_MASK[j + 3][i + 3] && inside(f, y0 + j, x0 + i) && Math.abs(f[y0 + j][x0 + i] - c) <= t1) n++;
+    return n;
+  }
+  // Eq. 4.15
+  function susan(f, t1, t2, q = t2) {
+    const area = mapImg(f, (_, y, x) => usanArea(f, y, x, t1));
+    return { area, C: mapImg(area, a => (a <= t2 ? q - a : 0)) };
+  }
+
+  // Algorithm 4-1: strict local maxima above T (4- or 8-neighbour), borders skipped
+  function localMax(m, T, nb = 4) {
+    const out = [], N4 = [[0, 1], [0, -1], [1, 0], [-1, 0]], NB = nb === 8 ? DIR8 : N4;
+    for (let y = 1; y < H(m) - 1; y++) for (let x = 1; x < W(m) - 1; x++) {
+      const c = m[y][x];
+      if (c > T && NB.every(([dy, dx]) => c > m[y + dy][x + dx])) out.push([y, x, c]);
+    }
+    return out;
+  }
+
+  // σ²|d_yy + d_xx| at one pixel (Eq. 4.17), Gaussian weights summed directly
+  function normLapAt(f, y0, x0, sigma) {
+    const r = Math.ceil(3 * sigma) + 1, s2 = sigma * sigma, val = (yc, xc) => {
+      let s = 0, ws = 0;
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) { const w = Math.exp(-(j * j + i * i) / (2 * s2)); s += w * f[clamp(yc + j, 0, H(f) - 1)][clamp(xc + i, 0, W(f) - 1)]; ws += w; }
+      return s / ws;
+    };
+    const c = val(y0, x0);
+    return s2 * Math.abs(val(y0 + 1, x0) + val(y0 - 1, x0) + val(y0, x0 + 1) + val(y0, x0 - 1) - 4 * c);
+  }
+  function normLap(f, sigma) { const hs = hessian(f, sigma); return mapImg(hs.lap, v => sigma * sigma * Math.abs(v)); }
+
+  // Eq. 4.18–4.19: scale-adapted second moment matrix
+  function harrisScale(f, sI, sD, k = 0.04) {
+    const g = gaussianBlur(f, sD), h = H(f), w = W(f);
+    const at = (y, x) => g[clamp(y, 0, h - 1)][clamp(x, 0, w - 1)];
+    const dy = zeros(h, w), dx = zeros(h, w);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { dy[y][x] = (at(y + 1, x) - at(y - 1, x)) / 2; dx[y][x] = (at(y, x + 1) - at(y, x - 1)) / 2; }
+    const s2 = sD * sD, sm = m => gaussianBlur(m, sI);
+    const p = sm(mapImg(dy, v => s2 * v * v)), q = sm(mapImg(dx, v => s2 * v * v)), r = sm(mapImg(dy, (v, y, x) => s2 * v * dx[y][x]));
+    return mapImg(p, (pv, y, x) => pv * q[y][x] - r[y][x] ** 2 - k * (pv + q[y][x]) ** 2);
+  }
+
+  // SIFT scale space (Fig 4-16): six Gaussians per octave, σ_i = σ0·k^i, five DOGs
+  function siftPyramid(f, nOct = 2, sigma0 = 1.6, s = 3) {
+    const k = Math.pow(2, 1 / s), sig = Array.from({ length: s + 3 }, (_, i) => sigma0 * Math.pow(k, i));
+    const octs = [];
+    let base = null;
+    for (let o = 0; o < nOct; o++) {
+      const gauss = sig.map((sg, i) => (o === 0 ? gaussianBlur(f, sg) : i === 0 ? base : gaussianBlur(base, Math.sqrt(sg * sg - sigma0 * sigma0))));
+      const dog = gauss.slice(1).map((g, i) => mapImg(g, (v, y, x) => v - gauss[i][y][x]));
+      octs.push({ o, gauss, dog, sig });
+      const g3 = gauss[s];
+      base = g3.filter((_, y) => y % 2 === 0).map(r => r.filter((_, x) => x % 2 === 0));
+      if (H(base) < 8 || W(base) < 8) break;
+    }
+    return octs;
+  }
+  // Fig 4-17: extremum among 26 neighbours in DOG i-1, i, i+1
+  function dogExtremum(dog, i, y, x) {
+    const c = dog[i][y][x]; let isMax = true, isMin = true;
+    for (let d = -1; d <= 1; d++) for (let j = -1; j <= 1; j++) for (let a = -1; a <= 1; a++) {
+      if (!d && !j && !a) continue;
+      const v = dog[i + d][y + j][x + a];
+      if (v >= c) isMax = false;
+      if (v <= c) isMin = false;
+    }
+    return isMax ? 1 : isMin ? -1 : 0;
+  }
+  function siftKeypoints(octs, thr = 0.03 * 255, edgeR = 0) {
+    const kps = [];
+    for (const O of octs) {
+      const { dog, o } = O, h = H(dog[0]), w = W(dog[0]);
+      for (let i = 1; i < dog.length - 1; i++) for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const c = dog[i][y][x];
+        if (Math.abs(c) < thr) continue;
+        const e = dogExtremum(dog, i, y, x);
+        if (!e) continue;
+        if (edgeR) {
+          const D = dog[i], dyy = D[y + 1][x] - 2 * c + D[y - 1][x], dxx = D[y][x + 1] - 2 * c + D[y][x - 1];
+          const dyx = (D[y + 1][x + 1] - D[y + 1][x - 1] - D[y - 1][x + 1] + D[y - 1][x - 1]) / 4;
+          const det = dyy * dxx - dyx * dyx, tr = dyy + dxx;
+          if (det <= 0 || tr * tr / det >= (edgeR + 1) ** 2 / edgeR) continue;
+        }
+        // Eq. 4.21 (without sub-pixel refinement)
+        kps.push({ o, i, y, x, v: c, type: e, Y: y * 2 ** o, X: x * 2 ** o, s: 1.6 * Math.pow(2, (o + i) / 3) });
+      }
+    }
+    return kps;
+  }
+
+  // integral image with a zero row/column in front: ii[y+1][x+1] = Σ f[0..y][0..x]
+  function integral(f) {
+    const h = H(f), w = W(f), ii = zeros(h + 1, w + 1);
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += f[y][x]; ii[y + 1][x + 1] = ii[y][x + 1] + row; } }
+    return ii;
+  }
+  // Σ f over rows y0..y1, cols x0..x1 (inclusive) with four lookups
+  const boxSum = (ii, y0, x0, y1, x1) => ii[y1 + 1][x1 + 1] - ii[y0][x1 + 1] - ii[y1 + 1][x0] + ii[y0][x0];
+  // SURF box filters (Fig 4-18 c,d) for size L = 3l: lists of [y0, x0, y1, x1, weight] relative to the centre
+  function surfBoxes(L) {
+    const l = L / 3, hw = l - 1, top = -(3 * l - 1) / 2;
+    const yy = [[top, -hw, top + l - 1, hw, 1], [top + l, -hw, top + 2 * l - 1, hw, -2], [top + 2 * l, -hw, top + 3 * l - 1, hw, 1]];
+    return { yy, xx: yy.map(([a, b, c, d, wt]) => [b, a, d, c, wt]), yx: [[-l, -l, -1, -1, 1], [-l, 1, -1, l, -1], [1, -l, l, -1, -1], [1, 1, l, l, 1]] };
+  }
+  function surfMask(L, which) {
+    const m = zeros(L, L), c = (L - 1) / 2;
+    for (const [y0, x0, y1, x1, wt] of surfBoxes(L)[which]) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) m[y + c][x + c] = wt;
+    return m;
+  }
+  function surfDet(ii, L, h, w, wgt = 0.9) {
+    const B = surfBoxes(L), c = (L - 1) / 2, out = zeros(h, w), area = L * L;
+    const resp = (list, y, x) => list.reduce((s, [y0, x0, y1, x1, wt]) => s + wt * boxSum(ii, y + y0, x + x0, y + y1, x + x1), 0) / area;
+    for (let y = c; y < h - c; y++) for (let x = c; x < w - c; x++) {
+      const dyy = resp(B.yy, y, x), dxx = resp(B.xx, y, x), dyx = resp(B.yx, y, x);
+      out[y][x] = dyy * dxx - (wgt * dyx) ** 2;
+    }
+    return out;
+  }
+  // octave o (0-based) → four filter sizes (9,15,21,27 / 15,27,39,51 / 27,51,75,99)
+  function surfSizes(o) { let start = 9, step = 6; for (let k = 0; k < o; k++) { start += step; step *= 2; } return [0, 1, 2, 3].map(i => start + i * step); }
+
+  // whole-image warps (bilinear, background = border value)
+  function warp(f, deg, scale = 1, outH, outW) {
+    const h = H(f), w = W(f), oh = outH || Math.round(h * scale), ow = outW || Math.round(w * scale);
+    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t), cy = (h - 1) / 2, cx = (w - 1) / 2, oy = (oh - 1) / 2, ox = (ow - 1) / 2;
+    const out = zeros(oh, ow);
+    // forward: p' = R·S·(p − c) + o   ⇒   p = Sᐨ¹·Rᵀ·(p' − o) + c
+    for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+      const dy = y - oy, dx = x - ox, sy = (c * dy - s * dx) / scale + cy, sx = (s * dy + c * dx) / scale + cx;
+      out[y][x] = bilinear(f, sy, sx);
+    }
+    return { img: out, map: (y, x) => { const dy = (y - cy) * scale, dx = (x - cx) * scale; return [c * dy + s * dx + oy, -s * dy + c * dx + ox]; } };
+  }
+
   return {
     zeros, clone, clamp, inside, DIR8, histogram, equalize, otsu, correlate1D, convolve1D, correlate2D,
     maskSize, gaussian1D, gaussianBlur, logKernel, OPS, applyAt, gradAngle, edgeDir8, NMS_NB, edgeMaps, nms, hysteresis,
     ZC_PAIRS, zcAt, zeroCross, sptaTerms, sptaPass, transitions, hough, morph, median, bilinear, M, burtKernel, pyramidDown, rgb2hsi,
+    moravecS, moravecC, moravecMap, BOOK_G, gaussKernel2D, harris, eig2, hessian, SUSAN_MASK, usanArea, susan, localMax,
+    normLapAt, normLap, harrisScale, siftPyramid, dogExtremum, siftKeypoints, integral, boxSum, surfBoxes, surfMask, surfDet, surfSizes, warp,
   };
 })();
 if (typeof module !== 'undefined') module.exports = CV;

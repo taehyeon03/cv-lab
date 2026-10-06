@@ -259,7 +259,7 @@ table.data td.cur { background: var(--hl); }
 </style>
 <div class="app">
   <nav class="rail" id="rail" aria-label="단원 목록">
-    <div class="brand"><b>컴퓨터비전 실습실</b><span>2강 영상처리 · 3강 에지 검출</span><div class="slidebar" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
+    <div class="brand"><b>컴퓨터비전 실습실</b><span>2강 영상처리 · 3강 에지 검출 · 4강 지역 특징 검출</span><div class="slidebar" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
   </nav>
   <div>
     <div class="mobile-nav"><select id="msel" aria-label="단원 선택"></select></div>
@@ -585,10 +585,200 @@ const CV = (() => {
     return { h, s, i };
   }
 
+  // ---------- Chapter 4: local feature detection ----------
+  const zget = (f, y, x) => (inside(f, y, x) ? f[y][x] : 0);
+  const mapImg = (f, fn) => f.map((r, y) => r.map((v, x) => fn(v, y, x)));
+
+  // Eq. 4.1 with a (2r+1)² box window w; outside the image counts as 0 (Example 4-1)
+  function moravecS(f, y0, x0, r = 1) {
+    const S = zeros(3, 3);
+    for (let v = -1; v <= 1; v++) for (let u = -1; u <= 1; u++) {
+      let s = 0;
+      for (let y = y0 - r; y <= y0 + r; y++) for (let x = x0 - r; x <= x0 + r; x++) s += (zget(f, y + v, x + u) - zget(f, y, x)) ** 2;
+      S[v + 1][u + 1] = s;
+    }
+    return S;
+  }
+  // Eq. 4.2
+  const moravecC = S => Math.min(S[1][2], S[1][0], S[2][1], S[0][1]);
+  function moravecMap(f, r = 1) { return mapImg(f, (_, y, x) => moravecC(moravecS(f, y, x, r))); }
+
+  // Example 4-2: d_y, d_x with [-1 0 1]ᵀ / [-1 0 1], then G ⊛ products (zero outside)
+  const BOOK_G = [[.0751, .1238, .0751], [.1238, .2042, .1238], [.0751, .1238, .0751]];
+  function gaussKernel2D(sigma) { const g = gaussian1D(sigma); return g.map(a => g.map(b => a * b)); }
+  function harris(f, { G = BOOK_G, k = 0.04, border = 'zero' } = {}) {
+    const g = border === 'zero' ? zget : (a, y, x) => a[clamp(y, 0, H(a) - 1)][clamp(x, 0, W(a) - 1)];
+    const dy = mapImg(f, (_, y, x) => g(f, y + 1, x) - g(f, y - 1, x));
+    const dx = mapImg(f, (_, y, x) => g(f, y, x + 1) - g(f, y, x - 1));
+    const dyy = mapImg(dy, v => v * v), dxx = mapImg(dx, v => v * v), dyx = mapImg(dy, (v, y, x) => v * dx[y][x]);
+    const p = correlate2D(dyy, G, border), q = correlate2D(dxx, G, border), r = correlate2D(dyx, G, border);
+    const C = mapImg(p, (pv, y, x) => pv * q[y][x] - r[y][x] ** 2 - k * (pv + q[y][x]) ** 2);
+    return { dy, dx, dyy, dxx, dyx, p, q, r, C };
+  }
+  // eigenvalues of the symmetric 2×2 [[p r][r q]]
+  function eig2(p, r, q) { const t = (p + q) / 2, d = Math.sqrt(((p - q) / 2) ** 2 + r * r); return [t + d, t - d]; }
+
+  // Eq. 4.11–4.13 on the Gaussian-smoothed image
+  function hessian(f, sigma) {
+    const g = gaussianBlur(f, sigma), h = H(f), w = W(f);
+    const at = (y, x) => g[clamp(y, 0, h - 1)][clamp(x, 0, w - 1)];
+    const dyy = zeros(h, w), dxx = zeros(h, w), dyx = zeros(h, w), det = zeros(h, w), lap = zeros(h, w);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const c = at(y, x);
+      dyy[y][x] = at(y + 1, x) - 2 * c + at(y - 1, x);
+      dxx[y][x] = at(y, x + 1) - 2 * c + at(y, x - 1);
+      dyx[y][x] = (at(y + 1, x + 1) - at(y + 1, x - 1) - at(y - 1, x + 1) + at(y - 1, x - 1)) / 4;
+      det[y][x] = dyy[y][x] * dxx[y][x] - dyx[y][x] ** 2;
+      lap[y][x] = dyy[y][x] + dxx[y][x];
+    }
+    return { g, dyy, dxx, dyx, det, lap };
+  }
+
+  // Fig 4-8: 7×7 circular mask, area 37
+  const SUSAN_MASK = [[0, 0, 1, 1, 1, 0, 0], [0, 1, 1, 1, 1, 1, 0], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [0, 1, 1, 1, 1, 1, 0], [0, 0, 1, 1, 1, 0, 0]];
+  // Eq. 4.14 (pixels outside the image are not counted)
+  function usanArea(f, y0, x0, t1) {
+    let n = 0; const c = f[y0][x0];
+    for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) if (SUSAN_MASK[j + 3][i + 3] && inside(f, y0 + j, x0 + i) && Math.abs(f[y0 + j][x0 + i] - c) <= t1) n++;
+    return n;
+  }
+  // Eq. 4.15
+  function susan(f, t1, t2, q = t2) {
+    const area = mapImg(f, (_, y, x) => usanArea(f, y, x, t1));
+    return { area, C: mapImg(area, a => (a <= t2 ? q - a : 0)) };
+  }
+
+  // Algorithm 4-1: strict local maxima above T (4- or 8-neighbour), borders skipped
+  function localMax(m, T, nb = 4) {
+    const out = [], N4 = [[0, 1], [0, -1], [1, 0], [-1, 0]], NB = nb === 8 ? DIR8 : N4;
+    for (let y = 1; y < H(m) - 1; y++) for (let x = 1; x < W(m) - 1; x++) {
+      const c = m[y][x];
+      if (c > T && NB.every(([dy, dx]) => c > m[y + dy][x + dx])) out.push([y, x, c]);
+    }
+    return out;
+  }
+
+  // σ²|d_yy + d_xx| at one pixel (Eq. 4.17), Gaussian weights summed directly
+  function normLapAt(f, y0, x0, sigma) {
+    const r = Math.ceil(3 * sigma) + 1, s2 = sigma * sigma, val = (yc, xc) => {
+      let s = 0, ws = 0;
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) { const w = Math.exp(-(j * j + i * i) / (2 * s2)); s += w * f[clamp(yc + j, 0, H(f) - 1)][clamp(xc + i, 0, W(f) - 1)]; ws += w; }
+      return s / ws;
+    };
+    const c = val(y0, x0);
+    return s2 * Math.abs(val(y0 + 1, x0) + val(y0 - 1, x0) + val(y0, x0 + 1) + val(y0, x0 - 1) - 4 * c);
+  }
+  function normLap(f, sigma) { const hs = hessian(f, sigma); return mapImg(hs.lap, v => sigma * sigma * Math.abs(v)); }
+
+  // Eq. 4.18–4.19: scale-adapted second moment matrix
+  function harrisScale(f, sI, sD, k = 0.04) {
+    const g = gaussianBlur(f, sD), h = H(f), w = W(f);
+    const at = (y, x) => g[clamp(y, 0, h - 1)][clamp(x, 0, w - 1)];
+    const dy = zeros(h, w), dx = zeros(h, w);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { dy[y][x] = (at(y + 1, x) - at(y - 1, x)) / 2; dx[y][x] = (at(y, x + 1) - at(y, x - 1)) / 2; }
+    const s2 = sD * sD, sm = m => gaussianBlur(m, sI);
+    const p = sm(mapImg(dy, v => s2 * v * v)), q = sm(mapImg(dx, v => s2 * v * v)), r = sm(mapImg(dy, (v, y, x) => s2 * v * dx[y][x]));
+    return mapImg(p, (pv, y, x) => pv * q[y][x] - r[y][x] ** 2 - k * (pv + q[y][x]) ** 2);
+  }
+
+  // SIFT scale space (Fig 4-16): six Gaussians per octave, σ_i = σ0·k^i, five DOGs
+  function siftPyramid(f, nOct = 2, sigma0 = 1.6, s = 3) {
+    const k = Math.pow(2, 1 / s), sig = Array.from({ length: s + 3 }, (_, i) => sigma0 * Math.pow(k, i));
+    const octs = [];
+    let base = null;
+    for (let o = 0; o < nOct; o++) {
+      const gauss = sig.map((sg, i) => (o === 0 ? gaussianBlur(f, sg) : i === 0 ? base : gaussianBlur(base, Math.sqrt(sg * sg - sigma0 * sigma0))));
+      const dog = gauss.slice(1).map((g, i) => mapImg(g, (v, y, x) => v - gauss[i][y][x]));
+      octs.push({ o, gauss, dog, sig });
+      const g3 = gauss[s];
+      base = g3.filter((_, y) => y % 2 === 0).map(r => r.filter((_, x) => x % 2 === 0));
+      if (H(base) < 8 || W(base) < 8) break;
+    }
+    return octs;
+  }
+  // Fig 4-17: extremum among 26 neighbours in DOG i-1, i, i+1
+  function dogExtremum(dog, i, y, x) {
+    const c = dog[i][y][x]; let isMax = true, isMin = true;
+    for (let d = -1; d <= 1; d++) for (let j = -1; j <= 1; j++) for (let a = -1; a <= 1; a++) {
+      if (!d && !j && !a) continue;
+      const v = dog[i + d][y + j][x + a];
+      if (v >= c) isMax = false;
+      if (v <= c) isMin = false;
+    }
+    return isMax ? 1 : isMin ? -1 : 0;
+  }
+  function siftKeypoints(octs, thr = 0.03 * 255, edgeR = 0) {
+    const kps = [];
+    for (const O of octs) {
+      const { dog, o } = O, h = H(dog[0]), w = W(dog[0]);
+      for (let i = 1; i < dog.length - 1; i++) for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const c = dog[i][y][x];
+        if (Math.abs(c) < thr) continue;
+        const e = dogExtremum(dog, i, y, x);
+        if (!e) continue;
+        if (edgeR) {
+          const D = dog[i], dyy = D[y + 1][x] - 2 * c + D[y - 1][x], dxx = D[y][x + 1] - 2 * c + D[y][x - 1];
+          const dyx = (D[y + 1][x + 1] - D[y + 1][x - 1] - D[y - 1][x + 1] + D[y - 1][x - 1]) / 4;
+          const det = dyy * dxx - dyx * dyx, tr = dyy + dxx;
+          if (det <= 0 || tr * tr / det >= (edgeR + 1) ** 2 / edgeR) continue;
+        }
+        // Eq. 4.21 (without sub-pixel refinement)
+        kps.push({ o, i, y, x, v: c, type: e, Y: y * 2 ** o, X: x * 2 ** o, s: 1.6 * Math.pow(2, (o + i) / 3) });
+      }
+    }
+    return kps;
+  }
+
+  // integral image with a zero row/column in front: ii[y+1][x+1] = Σ f[0..y][0..x]
+  function integral(f) {
+    const h = H(f), w = W(f), ii = zeros(h + 1, w + 1);
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += f[y][x]; ii[y + 1][x + 1] = ii[y][x + 1] + row; } }
+    return ii;
+  }
+  // Σ f over rows y0..y1, cols x0..x1 (inclusive) with four lookups
+  const boxSum = (ii, y0, x0, y1, x1) => ii[y1 + 1][x1 + 1] - ii[y0][x1 + 1] - ii[y1 + 1][x0] + ii[y0][x0];
+  // SURF box filters (Fig 4-18 c,d) for size L = 3l: lists of [y0, x0, y1, x1, weight] relative to the centre
+  function surfBoxes(L) {
+    const l = L / 3, hw = l - 1, top = -(3 * l - 1) / 2;
+    const yy = [[top, -hw, top + l - 1, hw, 1], [top + l, -hw, top + 2 * l - 1, hw, -2], [top + 2 * l, -hw, top + 3 * l - 1, hw, 1]];
+    return { yy, xx: yy.map(([a, b, c, d, wt]) => [b, a, d, c, wt]), yx: [[-l, -l, -1, -1, 1], [-l, 1, -1, l, -1], [1, -l, l, -1, -1], [1, 1, l, l, 1]] };
+  }
+  function surfMask(L, which) {
+    const m = zeros(L, L), c = (L - 1) / 2;
+    for (const [y0, x0, y1, x1, wt] of surfBoxes(L)[which]) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) m[y + c][x + c] = wt;
+    return m;
+  }
+  function surfDet(ii, L, h, w, wgt = 0.9) {
+    const B = surfBoxes(L), c = (L - 1) / 2, out = zeros(h, w), area = L * L;
+    const resp = (list, y, x) => list.reduce((s, [y0, x0, y1, x1, wt]) => s + wt * boxSum(ii, y + y0, x + x0, y + y1, x + x1), 0) / area;
+    for (let y = c; y < h - c; y++) for (let x = c; x < w - c; x++) {
+      const dyy = resp(B.yy, y, x), dxx = resp(B.xx, y, x), dyx = resp(B.yx, y, x);
+      out[y][x] = dyy * dxx - (wgt * dyx) ** 2;
+    }
+    return out;
+  }
+  // octave o (0-based) → four filter sizes (9,15,21,27 / 15,27,39,51 / 27,51,75,99)
+  function surfSizes(o) { let start = 9, step = 6; for (let k = 0; k < o; k++) { start += step; step *= 2; } return [0, 1, 2, 3].map(i => start + i * step); }
+
+  // whole-image warps (bilinear, background = border value)
+  function warp(f, deg, scale = 1, outH, outW) {
+    const h = H(f), w = W(f), oh = outH || Math.round(h * scale), ow = outW || Math.round(w * scale);
+    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t), cy = (h - 1) / 2, cx = (w - 1) / 2, oy = (oh - 1) / 2, ox = (ow - 1) / 2;
+    const out = zeros(oh, ow);
+    // forward: p' = R·S·(p − c) + o   ⇒   p = Sᐨ¹·Rᵀ·(p' − o) + c
+    for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+      const dy = y - oy, dx = x - ox, sy = (c * dy - s * dx) / scale + cy, sx = (s * dy + c * dx) / scale + cx;
+      out[y][x] = bilinear(f, sy, sx);
+    }
+    return { img: out, map: (y, x) => { const dy = (y - cy) * scale, dx = (x - cx) * scale; return [c * dy + s * dx + oy, -s * dy + c * dx + ox]; } };
+  }
+
   return {
     zeros, clone, clamp, inside, DIR8, histogram, equalize, otsu, correlate1D, convolve1D, correlate2D,
     maskSize, gaussian1D, gaussianBlur, logKernel, OPS, applyAt, gradAngle, edgeDir8, NMS_NB, edgeMaps, nms, hysteresis,
     ZC_PAIRS, zcAt, zeroCross, sptaTerms, sptaPass, transitions, hough, morph, median, bilinear, M, burtKernel, pyramidDown, rgb2hsi,
+    moravecS, moravecC, moravecMap, BOOK_G, gaussKernel2D, harris, eig2, hessian, SUSAN_MASK, usanArea, susan, localMax,
+    normLapAt, normLap, harrisScale, siftPyramid, dogExtremum, siftKeypoints, integral, boxSum, surfBoxes, surfMask, surfDet, surfSizes, warp,
   };
 })();
 if (typeof module !== 'undefined') module.exports = CV;
@@ -865,6 +1055,40 @@ const UI = (() => {
     return { el, canvas: cv, ctx, draw, setCaption: t => (capL.textContent = t), setInfo: t => (capR.textContent = t), hsl };
   }
 
+  // ---------- Feature view: image scaled up crisply, with vector marks (circles, crosses) on top ----------
+  function FeatView({ caption = '', info = '', width = 480, onClick, onHover } = {}) {
+    const src = ImageView();
+    const cv = h('canvas', { width: 8, height: 8, style: { imageRendering: 'auto' } });
+    const capL = h('span', {}, caption), capR = h('span', { class: 'mono' }, info);
+    const el = h('div', { class: 'iv' }, cv, h('div', { class: 'caption' }, capL, capR));
+    const ctx = cv.getContext('2d');
+    let sc = 1;
+    const pos = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientY - r.top) / r.height * cv.height / sc), Math.floor((e.clientX - r.left) / r.width * cv.width / sc)]; };
+    if (onClick) { cv.style.cursor = 'crosshair'; cv.addEventListener('pointerdown', e => { const [y, x] = pos(e); if (y >= 0 && x >= 0 && y < cv.height / sc && x < cv.width / sc) onClick(y, x, e); }); }
+    if (onHover) cv.addEventListener('pointermove', e => { const [y, x] = pos(e); if (y >= 0 && x >= 0 && y < cv.height / sc && x < cv.width / sc) onHover(y, x); });
+    function draw(arr, mode = 'gray', opt = {}) {
+      src.draw(arr, mode, opt);
+      const H = arr.length, W = arr[0].length;
+      sc = Math.max(1, Math.min(48, Math.round((opt.width || width) / W)));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      if (cv.width !== W * sc * dpr) { cv.width = W * sc * dpr; cv.height = H * sc * dpr; }
+      sc *= dpr;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(src.canvas, 0, 0, cv.width, cv.height);
+      const P = (v) => (v + 0.5) * sc;
+      if (opt.grid && sc >= 12) { ctx.strokeStyle = 'rgba(128,128,128,.35)'; ctx.lineWidth = 1; ctx.beginPath(); for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * sc); ctx.lineTo(cv.width, y * sc); } for (let x = 0; x <= W; x++) { ctx.moveTo(x * sc, 0); ctx.lineTo(x * sc, cv.height); } ctx.stroke(); }
+      for (const m of opt.marks || []) {
+        ctx.strokeStyle = ctx.fillStyle = col(m.color || '--orange'); ctx.lineWidth = (m.w || 2) * dpr;
+        const x = P(m.x), y = P(m.y);
+        if (m.kind === 'cross') { const s = (m.size || 4) * dpr; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.stroke(); }
+        else if (m.kind === 'dot') { ctx.beginPath(); ctx.arc(x, y, (m.size || 3) * dpr, 0, 7); ctx.fill(); }
+        else if (m.kind === 'rect') { ctx.strokeRect(m.x * sc + 1, m.y * sc + 1, m.ww * sc - 2, m.hh * sc - 2); }
+        else { ctx.beginPath(); ctx.arc(x, y, Math.max(2 * dpr, m.r * sc), 0, 7); ctx.stroke(); }
+      }
+    }
+    return { el, canvas: cv, draw, setCaption: t => (capL.textContent = t), setInfo: t => (capR.textContent = t) };
+  }
+
   // ---------- Plot ----------
   function plot(canvas, o) {
     const dpr = window.devicePixelRatio || 1, W = o.w || 520, Hh = o.h || 200;
@@ -1013,7 +1237,7 @@ const UI = (() => {
   const grayBg = (v, max = 255) => { const t = Math.max(0, Math.min(1, v / max)); const g = Math.round(255 - t * 200); return `rgb(${g},${g},${g})`; };
   const signedBg = (v, amax) => { const t = Math.min(1, Math.abs(v) / (amax || 1)) * 0.55; return v >= 0 ? `color-mix(in srgb, var(--pos) ${t * 100}%, var(--cell-bg))` : `color-mix(in srgb, var(--neg) ${t * 100}%, var(--cell-bg))`; };
 
-  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, matrixEl, dataTable, formula, grayBg, signedBg };
+  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, FeatView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, matrixEl, dataTable, formula, grayBg, signedBg };
 })();
 
 // Module registry, page scaffold and hash router.
@@ -1046,15 +1270,16 @@ const APP = (() => {
 
   function intro(root) {
     root.append(
-      h('header', { class: 'mod-head' }, h('div', { class: 'mod-num' }, 'CV'), h('h1', {}, '컴퓨터비전개론 알고리즘 실습실'), h('div', { class: 'src' }, '2강 영상처리 · 3강 에지 검출 — 강의자료의 알고리즘을 직접 돌려 보는 곳')),
+      h('header', { class: 'mod-head' }, h('div', { class: 'mod-num' }, 'CV'), h('h1', {}, '컴퓨터비전개론 알고리즘 실습실'), h('div', { class: 'src' }, '2강 영상처리 · 3강 에지 검출 · 4강 지역 특징 검출 — 강의자료의 알고리즘을 직접 돌려 보는 곳')),
       slidebar(),
       h('p', { class: 'lead', html: '각 페이지는 <b>① 강의자료의 수식</b>, <b>② 값을 직접 바꿀 수 있는 시각화</b>, <b>③ 교재 의사 코드와 한 줄씩 맞춰 보는 단계 실행기</b>로 되어 있습니다. 단계 실행기는 Python Tutor처럼 ◀ ▶ 버튼(또는 키보드 ← →)으로 한 단계씩 움직이며, 지금 실행 중인 코드 줄이 노란색으로 표시되고 변수 값과 호출 스택이 함께 바뀝니다. 격자의 숫자는 대부분 클릭해서 바꿀 수 있습니다.' }),
     );
-    for (const ch of ['2', '3']) {
-      root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, ch === '2' ? 'Chapter 2 · 영상처리' : 'Chapter 3 · 에지 검출'));
+    const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출' };
+    for (const ch of ['2', '3', '4']) {
+      root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, CH[ch]));
       root.append(h('div', { class: 'intro-grid' }, mods.filter(m => m.ch === ch).map(m => h('a', { href: '#' + m.id }, h('div', { class: 'card' }, h('span', { class: 'n' }, m.num + (m.star ? '  · 단계 실행' : '')), h('b', {}, m.title), h('span', { class: 'caption' }, m.blurb))))));
     }
-    root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 그림 3-22, 3-25)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
+    root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 4-1, 4-2, 그림 3-22, 3-25, 4-9)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
   }
 
   // "헷갈리기 쉬운 점" — short Q&A shown under each module's formulas (collapsed)
@@ -1080,6 +1305,25 @@ const APP = (() => {
       ['466 vs 466처럼 같은데도 억제되는 게 맞나요?', '교재 8행이 ≤라서 맞습니다. 다만 이웃 (5,1)도 같은 이유로 지워져, 이 예제에서는 정사각형 왼쪽 경계의 4~6행이 <b>둘 다 사라져 끊깁니다</b>. 진짜 경계가 두 화소 사이에 있어 양쪽 강도가 같기 때문입니다. 실제 구현은 한쪽에만 등호를 붙여(&lt;, ≤) 동점이면 하나만 남깁니다. 시험은 교재 규칙(≤)대로 답하면 됩니다.'],
       ['T_low와 T_high는 언제 쓰나요?', '비최대 억제(5~9행)에는 임계값이 없습니다. 그다음 이력 임계값(12~23행)에서 씁니다. <b>T_high = 추적 시작</b>(16행: S &gt; T_high인 화소에서 follow_edge 시작), <b>T_low = 추적 이어 가기</b>(23행: 이웃 S &gt; T_low이면 따라감). T_low는 넘어도 강한 에지와 이어지지 않은 화소는 버려집니다. 캐니는 T_high : T_low를 2:1~3:1 정도로 권했습니다.'],
     ],
+    moravec: [
+      ['왜 S(v,u) 중 최솟값을 쓰나요?', '좋은 특징은 <b>어느 방향으로 옮겨도</b> 밝기가 크게 바뀌어야 합니다. 에지는 에지에 수직으로 옮기면 크게 바뀌지만 에지를 따라 옮기면 거의 안 바뀝니다. 최솟값은 “가장 덜 바뀌는 방향”의 변화량이라, 이것까지 커야 코너라고 볼 수 있습니다. 최댓값이나 합을 쓰면 에지도 높은 점수를 받습니다.'],
+      ['예제 4-1에서 S(0,1)=4는 어떻게 나오나요?', '점 b=(5,3) 주위 3×3(4≤y≤6, 2≤x≤4)에서 (f(y,x+1) − f(y,x))²를 더합니다. x=2→3 경계(0→1)가 세 줄 있어 3, 행 5의 x=4→5는 1→1이라 0, 행 4의 x=4→5는 1→0이라 1 → 합 4입니다. 단계 실행기에서 한 항씩 확인할 수 있습니다.'],
+    ],
+    harris: [
+      ['테일러 확장은 왜 쓰나요?', 'f(y+v,x+u) ≈ f(y,x) + v·d<sub>y</sub> + u·d<sub>x</sub>로 바꾸면 S(v,u)가 (v u)·A·(v u)<sup>T</sup>로 인수분해됩니다. 그러면 A는 (v,u)와 상관없이 <b>한 번만</b> 계산하면 되고, (v,u)가 실수여도 되어 모든 방향의 변화를 한꺼번에 알 수 있습니다. 모라벡은 방향마다 S를 다시 계산해야 했습니다.'],
+      ['고유값 대신 det와 trace를 쓰는 이유는?', 'λ1λ2 = det(A) = pq − r², λ1+λ2 = trace(A) = p+q이므로 C = λ1λ2 − k(λ1+λ2)²를 고유값 없이 바로 계산할 수 있습니다(제곱근이 필요 없음). 둘 다 크면 곱이 커서 C &gt; 0, 하나만 크면 곱이 작고 합의 제곱이 커서 C &lt; 0, 둘 다 작으면 C ≈ 0입니다. k는 보통 0.04~0.06.'],
+      ['G ⊛ d_y²에서 ⊛는 무엇인가요?', '컨볼루션입니다. 각 화소의 d<sub>y</sub>²를 그 주위 3×3에서 가우시안 가중치로 평균한다는 뜻이고, 식 (4.6)의 Σ<sub>y</sub>Σ<sub>x</sub> G(y,x)·d<sub>y</sub>²와 같습니다. 미분값을 먼저 제곱한 뒤 평균해야 +와 −가 상쇄되지 않습니다.'],
+    ],
+    susan: [
+      ['왜 넓이가 작을수록 코너인가요?', '중심과 비슷한 밝기의 화소는 중심이 속한 영역 쪽에만 있습니다. 평탄한 곳은 원 전체(37)가, 직선 에지 위는 절반 정도가, 뾰족한 코너는 그 각도만큼만 같은 영역이라 넓이가 더 작습니다. 그래서 q − usan_area가 클수록 코너답습니다.'],
+    ],
+    sift: [
+      ['한 옥타브에 왜 영상이 여섯 장인가요?', '스케일당 s=3장에서 극점을 찾으려면 DOG가 위·아래 하나씩 더 필요해 s+2=5장, DOG 5장을 만들려면 가우시안이 s+3=6장 필요합니다. k=2<sup>1/s</sup>=2<sup>1/3</sup>로 정하면 세 단계 뒤 σ가 정확히 두 배(3.2)가 되어, 그 영상을 반으로 줄여 다음 옥타브를 이어 갈 수 있습니다.'],
+      ['식 (4.21)의 2^o는 왜 곱하나요?', '옥타브 o의 영상은 원래 영상을 2<sup>o</sup>배 줄인 것이라, 그 영상의 (y′,x′)는 원래 영상에서 (y′·2<sup>o</sup>, x′·2<sup>o</sup>)입니다. 스케일도 같은 이유로 1.6×2<sup>(o+i)/3</sup>: 옥타브가 하나 오를 때마다 2배, 옥타브 안에서 한 장마다 2<sup>1/3</sup>배입니다.'],
+    ],
+    surf: [
+      ['SIFT와 SURF의 스케일 공간은 무엇이 다른가요?', 'SIFT는 <b>연산자 크기는 그대로</b> 두고 영상을 스무딩·축소하며(피라미드), SURF는 <b>영상은 그대로</b> 두고 마스크를 9, 15, 21, 27…로 키웁니다. 적분 영상 덕분에 마스크가 커져도 상자 하나의 합은 네 번 조회로 끝나므로 크기에 따른 비용이 없습니다.'],
+    ],
     backproj: [
       ['식 (2.4)에서 min(·, 1.0)은 왜 쓰나요?', 'ĥ<sub>m</sub>/ĥ<sub>i</sub>로 나누면 영상 전체에 흔한 색은 깎이고 얼굴에 특징적인 색은 커집니다. 그런데 ĥ<sub>i</sub>가 작으면 비율이 몇십 배까지 커지므로, 1에서 잘라 ① 신뢰도를 0~1로 두고 ② 드문 색 몇 칸이 결과를 독차지하지 않게 하고 ③ 분모가 작은 칸의 불안정한 값을 막습니다. 예: 0.30/0.05 = 6.0 → 1.0, 0.10/0.40 = 0.25 → 0.25.'],
     ],
@@ -1093,7 +1337,7 @@ const APP = (() => {
 
   function nav() {
     const rail = document.getElementById('rail'), msel = document.getElementById('msel');
-    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출']];
+    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['4', '4강 · 지역 특징 검출']];
     rail.append(h('a', { href: '#', 'data-id': '' }, h('span', { class: 'n' }, '—'), h('span', {}, '개요')));
     msel.append(h('option', { value: '' }, '개요'));
     for (const [ch, label] of groups) {
@@ -3496,6 +3740,934 @@ G G G G G G G G`;
           st.root),
         h('div', { class: 'stack' }, st.panel, h('div', { class: 'note' }, '허프 변환은 모든 점이 모든 직선에 투표하는 전역 방식이고, RANSAC은 운 좋게 인라이어 두 개를 고르는 시도를 반복하는 방식입니다. 아웃라이어 비율이 높을수록 n을 늘려야 좋은 두 점을 고를 확률이 커집니다.'))));
       rebuild();
+    },
+  });
+})();
+
+// Chapter 4 modules, part A: local feature basics, Moravec, Harris, Hessian/LoG, SUSAN, localisation (NMS)
+(() => {
+  const { h, fmt } = UI;
+  const R = String.raw;
+  const f3 = v => (Math.abs(v) < 5e-4 ? '0' : v.toFixed(3).replace(/^(-?)0\./, '$1.'));
+  // Fig 4-3(a): 12×12 synthetic triangle; a=(7,7), b=(5,3), c=(2,8)
+  const F43 = `0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 1 0 0 0 0 0 0 0 0
+0 0 0 1 1 0 0 0 0 0 0 0
+0 0 0 1 1 1 0 0 0 0 0 0
+0 0 0 1 1 1 1 0 0 0 0 0
+0 0 0 1 1 1 1 1 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0`;
+  const PTS = { a: [7, 7], b: [5, 3], c: [2, 8] };
+  const ptName = (y, x) => Object.keys(PTS).find(k => PTS[k][0] === y && PTS[k][1] === x);
+  const gray = () => UI.currentImage().gray;
+  const kindOf = (l1, l2, big) => (l1 < big * 0.05 ? ['평탄한 곳', 'pill'] : l2 < l1 * 0.2 ? ['에지', 'pill hot'] : ['코너(특징점)', 'pill ok']);
+
+  // ================= 4.1 basics =================
+  APP.mod({
+    id: 'feat', ch: '4', num: '4.1', title: '지역 특징 검출의 기초', src: '4강 p.3–6 · 지역 특징의 표현·성질·검출 원리',
+    blurb: '에지 대신 지역 특징을 쓰는 이유, <위치,스케일,방향,특징 벡터>, 좋은 특징의 여섯 가지 성질.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '에지는 강도와 방향밖에 없어 두 영상에서 <b>같은 점을 짝짓기(매칭)</b>에는 정보가 모자랍니다. 그래서 주위와 두드러지게 달라 풍부한 정보를 뽑을 수 있는 <b>지역 특징</b>을 씁니다. 80년대에는 에지 토막에서 곡률이 큰 곳을 코너로 찾았지만, 이제는 <b>명암 영상에서 직접</b> 찾고, “물리적으로 코너인가”보다 <b>“다시 찍어도 또 검출되는가(반복성)”</b>를 중요하게 봅니다.',
+        formulas: [[R`$$\text{지역 특징} = \langle\,\text{위치},\ \text{스케일},\ \text{방향},\ \text{특징 벡터}\,\rangle = \big((y,x),\ s,\ \theta,\ \mathbf{x}\big)$$`, '검출 단계(4장): 위치·스케일 · 기술 단계(6장): 방향·특징 벡터']],
+      });
+      const props = [
+        ['반복성', 'repeatability', '같은 물체를 다른 시점·조명·크기로 찍어도 같은 곳에서 다시 검출된다.'],
+        ['분별력', 'distinctiveness', '다른 곳의 특징과 헷갈리지 않도록 서로 충분히 다르다.'],
+        ['지역성', 'locality', '작은 영역만 보고 정한다 → 가림(occlusion)과 배경 변화에 강하다.'],
+        ['정확성', 'accuracy', '검출된 위치(와 스케일)가 정확하다.'],
+        ['적당한 양', 'quantity', '물체를 표현할 만큼 충분하되, 너무 많아 계산을 망치지 않는다.'],
+        ['계산 효율', 'efficiency', '실시간 응용에 쓸 수 있을 만큼 빠르다.'],
+      ];
+      // perception experiment: click anywhere, see how brightness changes when the window is shifted in 8 directions
+      let pt = null;
+      const iv = UI.FeatView({ caption: '영상을 클릭해 보세요 — 9×9 창을 8방향으로 한 화소씩 옮겨 봅니다', onClick: (y, x) => { pt = [y, x]; draw(); } });
+      const sBox = h('div');
+      function draw() {
+        const g = gray();
+        iv.draw(g, 'gray', { marks: pt ? [{ kind: 'rect', y: pt[0] - 4, x: pt[1] - 4, hh: 9, ww: 9 }] : [] });
+        if (!pt) { sBox.replaceChildren(h('p', { class: 'caption' }, '아직 고른 점이 없습니다.')); return; }
+        const S = CV.moravecS(g, pt[0], pt[1], 4), mx = Math.max(1, ...S.flat());
+        const vals = [S[1][2], S[1][0], S[2][1], S[0][1], S[0][0], S[0][2], S[2][0], S[2][2]], lo = Math.min(...vals), hi = Math.max(...vals);
+        const cls = hi < 2000 ? ['모든 방향으로 변화가 적다 → 평탄한 곳 (나쁜 특징)', 'pill'] : lo < hi * 0.15 ? ['어느 방향은 변화가 적고 어느 방향은 크다 → 에지 (애매한 특징)', 'pill hot'] : ['모든 방향으로 변화가 크다 → 코너 (좋은 특징)', 'pill ok'];
+        const gv = UI.GridView({ rows: 3, cols: 3, cs: 62, fs: 11, rowLabels: ['-1', '0', '1'], colLabels: ['-1', '0', '1'], cell: (y, x) => ({ t: Math.round(S[y][x]), ...APP.grayCell(S[y][x], mx) }) });
+        gv.draw();
+        sBox.replaceChildren(h('div', { class: 'row' }, h('div', { class: 'col' }, h('span', { class: 'caption' }, `S(v,u) 맵 — 점 (${pt[0]}, ${pt[1]}), 밝을수록 큰 변화`), gv.el),
+          h('div', { class: 'col', style: { maxWidth: '300px' } }, h('span', { class: cls[1] }, cls[0]), h('p', { class: 'caption' }, `가장 작은 변화 ${Math.round(lo)}, 가장 큰 변화 ${Math.round(hi)}. 사람에게 짝을 찾기 쉬운 곳(여러 방향으로 밝기가 바뀌는 곳)이 컴퓨터에게도 쉽습니다. 이 “좋은 정도”를 숫자로 만든 것이 다음 절의 특징 가능성 C입니다.`))));
+      }
+      UI.onImage(draw);
+      root.append(
+        h('div', { class: 'lab' },
+          h('div', { class: 'stack' },
+            h('div', { class: 'card' }, h('h3', {}, '인지 실험: 어떤 점이 짝 찾기 쉬운가', h('small', {}, '4.1.3')), h('div', { class: 'controls' }, UI.imagePicker()), h('div', { style: { marginTop: '10px' } }, iv.el)),
+            h('div', { class: 'card' }, h('h3', {}, '창을 옮겼을 때의 변화량'), sBox)),
+          h('div', { class: 'stack' },
+            h('div', { class: 'card' }, h('h3', {}, '지역 특징이 갖춰야 할 성질', h('small', {}, '4.1.2')), UI.dataTable(['성질', '영문', '뜻'], props.map(p => [h('b', {}, p[0]), p[1], p[2]])),
+              h('p', { class: 'note warn', style: { marginTop: '10px' } }, '이 성질들은 서로 길항(trade-off) 관계입니다. 예: 분별력을 높이려 영역을 넓히면 지역성이 떨어지고, 양을 늘리면 계산 효율이 떨어집니다. 그래서 응용에 맞는 특징을 골라야 합니다.')),
+            h('div', { class: 'card' }, h('h3', {}, '특징 검출의 역사', h('small', {}, '4.1.1')),
+              h('ul', { class: 'caption', style: { margin: 0, paddingLeft: '18px' } },
+                h('li', {}, '80년대: 에지 토막의 곡률이 큰 곳 = 코너 / dominant point 검출 연구가 활발'),
+                h('li', {}, '90년대 소강, 2000년대 사라짐 — 더 좋은 대안이 나왔기 때문'),
+                h('li', {}, '지역 특징: 명암 영상에서 직접 검출, 기준은 “코너다움”이 아니라 반복성'))))));
+      draw();
+    },
+  });
+
+  // ================= 4.2.1 Moravec =================
+  APP.mod({
+    id: 'moravec', ch: '4', num: '4.2.1', title: '모라벡 알고리즘', src: '4강 p.8–11 · 식 (4.1)(4.2), 예제 4-1, 그림 4-3·4-4', star: true,
+    blurb: '창을 한 화소씩 옮기며 제곱차의 합 S(v,u)를 계산. 예제 4-1의 점 b를 한 항씩 따라가기.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '점 주위의 창(마스크 w)을 (v,u)만큼 옮겼을 때 밝기가 얼마나 바뀌는지를 <b>제곱차의 합</b> S(v,u)로 잽니다. 코너는 모든 방향으로 S가 크고, 에지는 에지를 따라가는 방향으로만 작고, 평탄한 곳은 모두 작습니다. 그래서 <b>네 방향 중 가장 작은 값</b>을 특징 가능성 C로 씁니다. 왼쪽 격자를 클릭해 점을 고르고(값 바꾸기 모드에서는 0/1 토글), 단계 실행기로 예제 4-1을 따라가 보세요.',
+        formulas: [[R`$$S(v,u)=\sum_y\sum_x w(y,x)\,\big(f(y+v,x+u)-f(y,x)\big)^2$$`, '식 (4.1)'], [R`$$C=\min\big(S(0,1),\,S(0,-1),\,S(1,0),\,S(-1,0)\big)$$`, '식 (4.2)']],
+      });
+      let f = APP.parseGrid(F43), pt = [5, 3], r = 1, mode = 'pick', frame = null, Cmap = null;
+      const CODE = [
+        '// 점 (y0,x0)에서 S(v,u) 맵 계산 — w는 (2r+1)×(2r+1) 박스(값 1)',
+        'for(v=-1 to 1) for(u=-1 to 1) {',
+        '  S(v,u) = 0;',
+        '  for(y=y0-r to y0+r) for(x=x0-r to x0+r)   // w(y,x)=1인 곳',
+        '    S(v,u) += (f(y+v,x+u) - f(y,x))²;',
+        '}',
+        'C = min(S(0,1), S(0,-1), S(1,0), S(-1,0));   // 식 (4.2)',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '식 (4.1) → 식 (4.2)', render: fr => { frame = fr; draw(); } });
+      const gF = UI.GridView({
+        rows: 12, cols: 12, cs: 30, fs: 12, label: '입력 영상 f',
+        cell: (y, x) => {
+          const s = { t: f[y][x], cls: f[y][x] ? 'on' : '' };
+          if (frame && frame.y !== undefined) {
+            if (Math.abs(y - pt[0]) <= r && Math.abs(x - pt[1]) <= r) s.cls += ' win';
+            if (Math.abs(y - pt[0] - frame.v) <= r && Math.abs(x - pt[1] - frame.u) <= r) s.cls += ' win2';
+          }
+          const n = ptName(y, x); if (n) s.badge = n;
+          if (y === pt[0] && x === pt[1]) s.cls += ' cur';
+          return s;
+        },
+        onClick: (y, x) => { if (mode === 'pick') pt = [y, x]; else f[y][x] ^= 1; rebuild(); },
+      });
+      const gS = UI.GridView({ rows: 3, cols: 3, cs: 52, fs: 15, rowLabels: ['-1', '0', '1'], colLabels: ['-1', '0', '1'], label: 'S(v,u)', cell: (y, x) => {
+        if (!frame) return {};
+        const v = frame.S[y][x]; const s = { t: v === null ? '' : v };
+        if (v !== null) Object.assign(s, APP.grayCell(v, 9));
+        if (frame.v === y - 1 && frame.u === x - 1) s.cls = 'cur';
+        if (frame.fin && ((y === 1) !== (x === 1))) s.bold = true;
+        return s;
+      } });
+      const gC = UI.GridView({ rows: 12, cols: 12, cs: 22, fs: 10, label: 'C 맵', cell: (y, x) => (Cmap ? { t: Cmap[y][x] || '', ...APP.grayCell(Cmap[y][x], Math.max(1, ...Cmap.flat())), cls: y === pt[0] && x === pt[1] ? 'cur' : '' } : {}), onClick: (y, x) => { pt = [y, x]; rebuild(); } });
+      const res = h('div');
+      function rebuild() {
+        Cmap = CV.moravecMap(f, r);
+        const [y0, x0] = pt, fr = [], S = [[null, null, null], [null, null, null], [null, null, null]];
+        fr.push({ line: 1, S: CV.clone(S), vars: { y0, x0, '마스크': `${2 * r + 1}×${2 * r + 1}` }, note: `점 (${y0}, ${x0})${ptName(y0, x0) ? ' = 교재의 점 ' + ptName(y0, x0) : ''} 주위 ${2 * r + 1}×${2 * r + 1} 창(주황)을 (v,u)만큼 옮긴 창(파랑)과 비교합니다.` });
+        for (let v = -1; v <= 1; v++) for (let u = -1; u <= 1; u++) {
+          let s = 0;
+          fr.push({ line: [2, 3], v, u, y: y0, x: x0, S: CV.clone(S), vars: { v, u, 'S(v,u)': 0 }, note: `(v,u) = (${v}, ${u}) — 창을 ${v ? (v > 0 ? '아래로 ' : '위로 ') + Math.abs(v) : ''}${v && u ? ', ' : ''}${u ? (u > 0 ? '오른쪽으로 ' : '왼쪽으로 ') + Math.abs(u) : ''}${!v && !u ? '옮기지 않으면 항상 0' : ' 옮깁니다'}.` });
+          for (let y = y0 - r; y <= y0 + r; y++) for (let x = x0 - r; x <= x0 + r; x++) {
+            const a = CV.inside(f, y + v, x + u) ? f[y + v][x + u] : 0, b = CV.inside(f, y, x) ? f[y][x] : 0, d = (a - b) ** 2;
+            s += d;
+            if (d || r === 1) fr.push({ line: [4, 5], v, u, y, x, S: CV.clone(S), vars: { v, u, y, x, 'f(y+v,x+u)': a, 'f(y,x)': b, '(차)²': d, 'S(v,u)': s }, note: `f(${y + v},${x + u}) − f(${y},${x}) = ${a} − ${b} → 제곱 <b>${d}</b>, 누적 S(${v},${u}) = ${s}` });
+          }
+          S[v + 1][u + 1] = s;
+          fr.push({ line: 6, v, u, y: y0, x: x0, S: CV.clone(S), vars: { v, u, 'S(v,u)': s }, note: `S(${v}, ${u}) = <b>${s}</b>` });
+        }
+        const C = CV.moravecC(S);
+        fr.push({ line: 7, S: CV.clone(S), fin: true, vars: { 'S(0,1)': S[1][2], 'S(0,-1)': S[1][0], 'S(1,0)': S[2][1], 'S(-1,0)': S[0][1], C }, note: `C = min(${S[1][2]}, ${S[1][0]}, ${S[2][1]}, ${S[0][1]}) = <b>${C}</b> — 상하좌우 네 방향(굵게)만 봅니다. 대각선 값은 쓰지 않습니다.` + (ptName(y0, x0) === 'b' && r === 1 ? ' 교재 예제 4-1의 S 맵(3 1 6 / 3 0 4 / 3 0 3)과 같습니다.' : '') });
+        st.load(fr, frame ? Math.min(st.i, fr.length - 1) : 0);
+        const row = k => { const S2 = CV.moravecS(f, ...PTS[k], r); return [h('b', {}, k + ' ' + JSON.stringify(PTS[k])), S2.map(rr => rr.join(' ')).join(' / '), CV.moravecC(S2)]; };
+        res.replaceChildren(UI.dataTable(['점', 'S(v,u) 맵 (행별)', 'C'], ['a', 'b', 'c'].map(row)), h('p', { class: 'caption' }, '그림 4-3(b): a(코너)는 모든 방향으로 값이 크고, b(에지)는 에지를 따라가는 방향 (−1,0)·(1,0)… 중 일부가 작고, c(평탄)는 모두 0입니다. 그런데 C 맵을 보면 a의 C가 2로 b의 0보다 크기는 하지만, 한 화소·네 방향만 봐서 대각선 에지에서도 값이 나오는 등 한계가 보입니다.'));
+      }
+      function draw() {
+        gF.draw(); gS.draw(); gC.draw();
+        if (frame && frame.y !== undefined && frame.line && [].concat(frame.line).includes(5)) gF.overlay([{ type: 'arrow', pts: [frame.y, frame.x, frame.y + frame.v, frame.x + frame.u], color: '--neg' }]); else gF.overlay([]);
+      }
+      const modeSeg = UI.segmented([['pick', '클릭: 점 고르기'], ['edit', '클릭: 값 0↔1']], mode, v => (mode = v));
+      const ptSeg = UI.segmented([['a', '점 a (코너)'], ['b', '점 b (에지)'], ['c', '점 c (평탄)']], 'b', v => { pt = PTS[v].slice(); rebuild(); });
+      const rSeg = UI.segmented([[1, '3×3 (교재)'], [2, '5×5']], 1, v => { r = v; rebuild(); });
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, ptSeg, modeSeg, UI.labeled('마스크', rSeg), h('button', { class: 'btn', type: 'button', onclick: () => { f = APP.parseGrid(F43); rebuild(); } }, '그림 4-3 영상으로')),
+            h('div', { class: 'row', style: { marginTop: '10px' } },
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f — 주황: 원래 창, 파랑: (v,u)만큼 옮긴 창, 화살표: 지금 비교하는 두 화소'), gF.el),
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, 'S(v,u) 맵 (가로 u, 세로 v)'), gS.el, h('span', { class: 'caption' }, '특징 가능성 C 맵 — 클릭하면 그 점으로'), gC.el))),
+          h('div', { class: 'card' }, h('h3', {}, '세 지점의 S 맵', h('small', {}, '그림 4-3(b)')), res),
+          h('div', { class: 'card' }, h('h3', {}, '모라벡의 한계'), h('ul', { class: 'caption', style: { margin: 0, paddingLeft: '18px' } }, h('li', {}, '한 화소만큼, 네 방향만 옮겨 본다 → 방향에 따라 값이 달라진다 (회전에 약함).'), h('li', {}, '박스 창이라 잡음에 대한 대처가 없다 → 해리스는 가우시안 가중치와 미분으로 이를 고칩니다.')))),
+        h('div', { class: 'stack' }, st.panel)));
+      rebuild();
+    },
+  });
+
+  // ================= 4.2.2 Harris =================
+  APP.mod({
+    id: 'harris', ch: '4', num: '4.2.2', title: '해리스 코너', src: '4강 p.12–19 · 식 (4.3)–(4.9), 예제 4-2, 표 4-1, 그림 4-5·4-6', star: true,
+    blurb: '가우시안 가중 제곱차 → 테일러 확장 → 2차 모멘트 행렬 A → 고유값 → C. 예제 4-2 그대로.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '해리스는 모라벡의 박스 창을 <b>가우시안 G</b>로 바꿔 잡음에 대처하고, 테일러 확장으로 S(v,u)를 <b>(v,u)와 무관한 행렬 A</b>와 u=(v,u)의 곱으로 인수분해했습니다. A만 보면 모든 방향의 변화를 알 수 있습니다: 고유값 <b>둘 다 크면 코너</b>, 하나만 크면 에지, 둘 다 작으면 평탄. 고유값 계산을 피하려고 C = det(A) − k·trace(A)²를 씁니다.',
+        formulas: [
+          [R`$$S(v,u)\cong\sum_y\sum_x G(y,x)\,(v\,d_y+u\,d_x)^2=\mathbf{u}\mathbf{A}\mathbf{u}^{\mathsf T}$$`, '식 (4.5)'],
+          [R`$$\mathbf{A}=\begin{pmatrix}G\circledast d_y^2 & G\circledast d_yd_x\\ G\circledast d_yd_x & G\circledast d_x^2\end{pmatrix}=\begin{pmatrix}p&r\\r&q\end{pmatrix}$$`, '식 (4.7)'],
+          [R`$$C=\lambda_1\lambda_2-k(\lambda_1+\lambda_2)^2=(pq-r^2)-k(p+q)^2$$`, '식 (4.8)(4.9)'],
+        ],
+      });
+      let f = APP.parseGrid(F43), pt = [7, 7], k = 0.04, show = 'p', frame = null, HR = null;
+      const MAPS = { dy: ['d_y', 'dy', 2], dx: ['d_x', 'dx', 2], dyy: ['d_y²', 'dyy', 4], dxx: ['d_x²', 'dxx', 4], dyx: ['d_y·d_x', 'dyx', 4], p: ['G⊛d_y² = p', 'p', 1], q: ['G⊛d_x² = q', 'q', 1], r: ['G⊛d_yd_x = r', 'r', 1], C: ['C (식 4.9)', 'C', 0.2] };
+      const CODE = [
+        'd_y = f ⊛ [-1 0 1]ᵀ;  d_x = f ⊛ [-1 0 1];   // 그림 4-5(b)',
+        'p = Σ G(j,i)·d_y²(y+j,x+i);    // 3×3 가우시안 σ=1.0',
+        'q = Σ G(j,i)·d_x²(y+j,x+i);',
+        'r = Σ G(j,i)·d_y·d_x(y+j,x+i);',
+        'A = [[p, r], [r, q]];           // 식 (4.7)',
+        'λ1, λ2 = A의 고유값;            // 표 4-1',
+        'C = (p·q − r²) − k·(p+q)²;      // 식 (4.9)',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '예제 4-2: 한 점의 행렬 A와 C', render: fr => { frame = fr; draw(); } });
+      const gF = UI.GridView({ rows: 12, cols: 12, cs: 24, fs: 11, label: '입력 f', cell: (y, x) => { const s = { t: f[y][x], cls: f[y][x] ? 'on' : '' }; const n = ptName(y, x); if (n) s.badge = n; if (frame && frame.nb && Math.abs(y - pt[0]) <= 1 && Math.abs(x - pt[1]) <= 1) s.cls += ' win'; if (y === pt[0] && x === pt[1]) s.cls += ' cur'; return s; }, onClick: (y, x, e) => { if (e.shiftKey) f[y][x] ^= 1; else pt = [y, x]; rebuild(); } });
+      const gM = UI.GridView({ rows: 12, cols: 12, cs: 40, fs: 10, label: '선택한 맵', cell: (y, x) => {
+        if (!HR) return {};
+        const [, key, amax] = MAPS[show], v = HR[key][y][x];
+        const s = { t: key === 'dy' || key === 'dx' || key === 'dyy' || key === 'dxx' || key === 'dyx' ? (v || '') : f3(v), ...APP.signedCell(v, amax) };
+        if (frame && frame.term && y === frame.term[0] && x === frame.term[1]) s.cls = 'cur';
+        else if (frame && frame.nb && Math.abs(y - pt[0]) <= 1 && Math.abs(x - pt[1]) <= 1) s.cls = 'win';
+        if (y === pt[0] && x === pt[1] && !(frame && frame.term)) s.cls = 'cur';
+        return s;
+      }, onClick: (y, x) => { pt = [y, x]; rebuild(); } });
+      const mapSel = UI.select(Object.entries(MAPS).map(([kk, v]) => [kk, v[0]]), show, v => { show = v; gM.draw(); }, 'hr-map');
+      const Abox = h('div'), tbl = h('div'), lam = h('canvas', { 'aria-label': '고유값 평면' });
+      function rebuild() {
+        HR = CV.harris(f, { k });
+        const [y0, x0] = pt, fr = [], G = CV.BOOK_G;
+        const nb = []; for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) nb.push([j, i]);
+        const at = (mp, y, x) => (CV.inside(f, y, x) ? HR[mp][y][x] : 0);
+        fr.push({ line: 1, nb: true, vars: { y: y0, x: x0, 'd_y(y,x)': at('dy', y0, x0), 'd_x(y,x)': at('dx', y0, x0) }, show: 'dy', note: `d<sub>y</sub>(y,x) = f(y+1,x) − f(y−1,x), d<sub>x</sub>(y,x) = f(y,x+1) − f(y,x−1). 점 (${y0}, ${x0}) 주위 3×3에서 이 값들을 G로 가중 평균합니다.` });
+        let acc = { p: 0, q: 0, r: 0 };
+        [['p', 'dyy', 2, 'd_y²'], ['q', 'dxx', 3, 'd_x²'], ['r', 'dyx', 4, 'd_y·d_x']].forEach(([key, src, line, nm]) => {
+          for (const [j, i] of nb) {
+            const y = y0 + j, x = x0 + i, w = G[j + 1][i + 1], v = at(src, y, x);
+            acc[key] += w * v;
+            fr.push({ line, nb: true, term: [y, x], show: src, vars: { j, i, 'G(j,i)': w, [nm]: v, [key]: +acc[key].toFixed(4) }, note: `G(${j},${i}) × ${nm}(${y},${x}) = ${w} × ${v} = ${(w * v).toFixed(4)} → ${key} = <b>${acc[key].toFixed(4)}</b>` });
+          }
+        });
+        const p = acc.p, q = acc.q, r = acc.r, [l1, l2] = CV.eig2(p, r, q), C = p * q - r * r - k * (p + q) ** 2;
+        fr.push({ line: 5, show: 'p', A: [[p, r], [r, q]], vars: { p: +p.toFixed(3), q: +q.toFixed(3), r: +r.toFixed(3) }, note: `A = [[${p.toFixed(3)}, ${r.toFixed(3)}], [${r.toFixed(3)}, ${q.toFixed(3)}]]` + (ptName(y0, x0) === 'a' ? ' — 교재 예제 4-2의 점 a와 같습니다 (0.522, −0.199, 0.527).' : '') });
+        fr.push({ line: 6, show: 'p', A: [[p, r], [r, q]], lam: [l1, l2], vars: { 'λ1': +l1.toFixed(4), 'λ2': +l2.toFixed(4) }, note: `λ1 = ${l1.toFixed(4)}, λ2 = ${l2.toFixed(4)} → <b>${kindOf(l1, l2, 0.5)[0]}</b>. 고유값은 A가 나타내는 두 주축 방향의 변화량입니다.` });
+        fr.push({ line: 7, show: 'C', A: [[p, r], [r, q]], lam: [l1, l2], vars: { 'det(A)': +(p * q - r * r).toFixed(4), 'trace(A)': +(p + q).toFixed(4), k, C: +C.toFixed(4) }, note: `C = (${p.toFixed(3)}×${q.toFixed(3)} − ${r.toFixed(3)}²) − ${k}×(${(p + q).toFixed(3)})² = <b>${C.toFixed(4)}</b>. 고유값으로 계산해도 λ1λ2 − k(λ1+λ2)² = ${(l1 * l2 - k * (l1 + l2) ** 2).toFixed(4)}로 같습니다.` });
+        st.load(fr, frame ? Math.min(st.i, fr.length - 1) : 0);
+        tbl.replaceChildren(UI.dataTable(['', 'a (7,7)', 'b (5,3)', 'c (2,8)'], (() => {
+          const cols = ['a', 'b', 'c'].map(n => { const [y, x] = PTS[n], P = HR.p[y][x], Q = HR.q[y][x], Rr = HR.r[y][x], [a1, a2] = CV.eig2(P, Rr, Q); return { P, Q, Rr, a1, a2, C: HR.C[y][x] }; });
+          return [['A', ...cols.map(c => UI.matrixEl([[c.P, c.Rr], [c.Rr, c.Q]]))], ['고유값', ...cols.map(c => `λ1=${c.a1.toFixed(4)}, λ2=${c.a2.toFixed(4)}`)], ['C', ...cols.map(c => c.C.toFixed(4))]];
+        })()), h('p', { class: 'caption' }, `교재 표 4-1: a C=0.1925, b C=0.0237, c C=0 (k=0.04). a의 C는 교재 행렬(0.522, −0.199, 0.527)을 식 (4.9)에 넣으면 0.1915가 되어, 교재 값 0.1925는 반올림·계산 차이로 보입니다. 순서(a ≫ b > c)는 같습니다.`));
+      }
+      function drawLam() {
+        const pts = ['a', 'b', 'c'].map(n => { const [y, x] = PTS[n]; return [n, ...CV.eig2(HR.p[y][x], HR.r[y][x], HR.q[y][x])]; });
+        const P = UI.plot(lam, { w: 320, h: 250, x: [0, 1], y: [0, 1], margin: { l: 36, b: 30 }, xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) });
+        const c = lam.getContext('2d');
+        for (let a = 0; a < 1; a += 0.02) for (let b = 0; b < 1; b += 0.02) { const C = a * b - k * (a + b) ** 2; c.fillStyle = C > 0.02 ? 'rgba(47,125,58,.18)' : C < 0 ? 'rgba(192,57,43,.10)' : 'rgba(0,0,0,0)'; c.fillRect(P.X(a), P.Y(b + 0.02), P.X(a + 0.02) - P.X(a), P.Y(b) - P.Y(b + 0.02)); }
+        const cur = frame && frame.lam ? [['●', ...frame.lam]] : [];
+        for (const [n, l1, l2] of [...pts, ...cur]) { c.fillStyle = UI.col(n === '●' ? '--orange' : '--ink'); c.beginPath(); c.arc(P.X(Math.min(1, l1)), P.Y(Math.min(1, l2)), n === '●' ? 6 : 4, 0, 7); c.fill(); c.font = '12px sans-serif'; c.textAlign = 'left'; if (n !== '●') c.fillText(n, P.X(Math.min(1, l1)) + 6, P.Y(Math.min(1, l2)) - 4); }
+        c.fillStyle = UI.col('--muted'); c.font = '11px sans-serif'; c.textAlign = 'center'; c.fillText('λ1', P.X(0.95), P.Y(0) + 18); c.textAlign = 'left'; c.fillText('λ2', 4, P.Y(0.97));
+      }
+      function draw() {
+        if (frame && frame.show && MAPS[frame.show] && frame.show !== show) { show = frame.show; mapSel.value = show; }
+        gF.draw(); gM.draw(); drawLam();
+        Abox.replaceChildren(...(frame && frame.A ? [h('span', { class: 'caption' }, 'A = '), UI.matrixEl(frame.A), frame.lam ? h('span', { class: kindOf(...frame.lam, 0.5)[1], style: { marginLeft: '10px' } }, kindOf(...frame.lam, 0.5)[0]) : null] : [h('span', { class: 'caption' }, '단계를 끝까지 진행하면 A와 고유값이 여기에 나옵니다.')]));
+      }
+      // real image
+      let sig = 1.5, thr = 0.02, useNms = false;
+      const iv = UI.FeatView({ caption: '' });
+      function real() {
+        const g = gray().map(r => r.map(v => v / 255)), Hm = CV.harris(g, { G: CV.gaussKernel2D(sig), k, border: 'replicate' });
+        const mx = Math.max(...Hm.C.flat()), T = thr * mx;
+        let pts = [];
+        if (useNms) pts = CV.localMax(Hm.C, T, 8).map(([y, x]) => [y, x]);
+        else Hm.C.forEach((r, y) => r.forEach((v, x) => { if (v > T) pts.push([y, x]); }));
+        iv.draw(gray(), 'gray', { marks: pts.map(([y, x]) => ({ kind: 'dot', y, x, size: useNms ? 3.5 : 1.6, color: '--neg' })) });
+        iv.setCaption(useNms ? `C > ${thr}·max 이면서 8-이웃보다 큰 점 (비최대 억제)` : `C > ${thr}·max 인 모든 화소 — 코너 주위에 덩어리로 몰려 나옴 (그림 4-6)`); iv.setInfo(`${pts.length}개`);
+      }
+      UI.onImage(real);
+      const ptSeg = UI.segmented([['a', '점 a'], ['b', '점 b'], ['c', '점 c']], 'a', v => { pt = PTS[v].slice(); rebuild(); });
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, ptSeg, UI.labeled('보는 맵', mapSel), UI.slider({ label: 'k', min: 0.02, max: 0.15, step: 0.01, value: k, id: 'hr-k', fmt: v => v.toFixed(2), oninput: v => { k = v; rebuild(); real(); } })),
+            h('div', { class: 'row', style: { marginTop: '10px' } },
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 f — 클릭: 점 고르기, Shift+클릭: 0↔1'), gF.el, h('div', {}, Abox)),
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '선택한 맵 (그림 4-5) — 주황 칸이 지금 더하는 항'), gM.el))),
+          h('div', { class: 'card' }, h('h3', {}, '세 점의 특징 가능성', h('small', {}, '표 4-1')), h('div', { class: 'row' }, tbl, h('div', { class: 'col' }, h('span', { class: 'caption' }, '고유값 평면: 초록 = C > 0.02 (코너), 빨강 = C < 0 (에지)'), lam))),
+          h('div', { class: 'card' }, h('h3', {}, '실제 영상에 적용', h('small', {}, '그림 4-6')),
+            h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: 'G의 σ', min: 0.7, max: 3, step: 0.1, value: sig, id: 'hr-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; real(); } }), UI.slider({ label: '임계값 (×max)', min: 0.002, max: 0.2, step: 0.002, value: thr, id: 'hr-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; real(); } }),
+              UI.segmented([[false, '임계값만'], [true, '+ 비최대 억제']], false, v => { useNms = v; real(); })),
+            h('div', { style: { marginTop: '10px' } }, iv.el),
+            h('p', { class: 'caption' }, '“코너”라는 이름은 정확하지 않습니다 — 실제로는 무늬가 복잡한 곳 어디서나 C가 커지므로 특징점 또는 관심점(interest point)이라 부르는 편이 낫습니다.'))),
+        h('div', { class: 'stack' }, st.panel)));
+      rebuild(); real();
+    },
+  });
+
+  // ================= 4.2.3 Hessian =================
+  APP.mod({
+    id: 'hessian', ch: '4', num: '4.2.3', title: '2차 미분: 헤시안과 LOG', src: '4강 p.20 · 식 (4.11)–(4.13)',
+    blurb: '가우시안으로 스무딩한 뒤의 2차 미분 행렬 H. 행렬식(det)과 대각합(LOG)을 특징 가능성으로.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '1차 미분 대신 <b>2차 미분</b>을 모은 헤시안 행렬 H를 씁니다. 잡음 때문에 먼저 σ 가우시안으로 스무딩한 뒤 미분합니다. <b>행렬식 det(H)</b>는 두 방향 곡률이 모두 클 때(블롭·코너) 커지고, <b>대각합 trace(H) = LOG</b>는 3장의 라플라시안과 같아 블롭과 에지 모두에 반응합니다. 영상을 클릭하면 그 점의 H를 보여 줍니다.',
+        formulas: [
+          [R`$$\mathbf{H}=\begin{pmatrix}d_{yy}(\sigma)&d_{yx}(\sigma)\\d_{yx}(\sigma)&d_{xx}(\sigma)\end{pmatrix},\quad d_{st}(\sigma)=\frac{\partial}{\partial t}\Big(\frac{\partial}{\partial s}\big(G(y,x,\sigma)\circledast f(y,x)\big)\Big)$$`, '식 (4.11)'],
+          [R`$$C=\det(\mathbf{H})=d_{yy}(\sigma)d_{xx}(\sigma)-d_{yx}(\sigma)^2$$`, '식 (4.12)'],
+          [R`$$C=\nabla^2=\operatorname{trace}(\mathbf{H})=d_{yy}(\sigma)+d_{xx}(\sigma)$$`, '식 (4.13)'],
+        ],
+      });
+      let sig = 2, which = 'det', pt = null, thr = 0.1;
+      const ivS = UI.FeatView({ caption: '', width: 420, onClick: (y, x) => { pt = [y, x]; draw(); } }), ivM = UI.FeatView({ caption: '', width: 420, onClick: (y, x) => { pt = [y, x]; draw(); } });
+      const info = h('div');
+      function draw() {
+        const g = gray(), Hs = CV.hessian(g, sig), map = which === 'det' ? Hs.det : Hs.lap;
+        const resp = which === 'det' ? map : map.map(r => r.map(Math.abs)), mx = Math.max(...resp.flat());
+        const pts = CV.localMax(resp, thr * mx, 8);
+        const marks = pts.map(([y, x]) => ({ y, x, r: sig * Math.SQRT2, color: '--orange', w: 1.5 }));
+        if (pt) marks.push({ kind: 'cross', y: pt[0], x: pt[1], color: '--neg', size: 6 });
+        ivS.draw(Hs.g, 'gray', { marks }); ivS.setCaption(`σ=${sig} 스무딩 영상 + 검출점 (원 반지름 √2σ)`); ivS.setInfo(`${pts.length}개`);
+        ivM.draw(map, 'signed', { marks: pt ? [{ kind: 'cross', y: pt[0], x: pt[1], color: '--ink', size: 6 }] : [] }); ivM.setCaption(which === 'det' ? 'det(H) — 주황 +, 파랑 −' : 'LOG = d_yy + d_xx — 주황 +, 파랑 −');
+        if (!pt) { info.replaceChildren(h('p', { class: 'caption' }, '영상을 클릭해 보세요.')); return; }
+        const [y, x] = pt, A = [[Hs.dyy[y][x], Hs.dyx[y][x]], [Hs.dyx[y][x], Hs.dxx[y][x]]], [l1, l2] = CV.eig2(A[0][0], A[0][1], A[1][1]);
+        info.replaceChildren(h('div', { class: 'row' }, h('span', { class: 'caption' }, `(${y}, ${x})  H = `), UI.matrixEl(A, 2)),
+          h('dl', { class: 'kv' }, h('dt', {}, 'det(H)'), h('dd', {}, Hs.det[y][x].toFixed(2)), h('dt', {}, 'trace(H)'), h('dd', {}, Hs.lap[y][x].toFixed(2)), h('dt', {}, '고유값'), h('dd', {}, `${l1.toFixed(2)}, ${l2.toFixed(2)}`)),
+          h('p', { class: 'caption' }, l1 * l2 > 0 ? '두 고유값의 부호가 같음 → 두 방향 모두 볼록/오목 (블롭 중심, det > 0)' : '두 고유값의 부호가 다르거나 하나가 0에 가까움 → 에지나 안장점 (det ≤ 0)'));
+      }
+      UI.onImage(draw);
+      root.append(h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(), UI.segmented([['det', 'det(H) (식 4.12)'], ['lap', 'LOG (식 4.13)']], which, v => { which = v; draw(); }), UI.slider({ label: 'σ', min: 1, max: 6, step: 0.5, value: sig, id: 'hs-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; draw(); } }), UI.slider({ label: '임계값 (×max)', min: 0.01, max: 0.6, step: 0.01, value: thr, id: 'hs-t', fmt: v => v.toFixed(2), oninput: v => { thr = v; draw(); } })),
+        h('div', { class: 'row', style: { marginTop: '12px' } }, h('div', { class: 'col', style: { flex: '1 1 380px' } }, ivS.el), h('div', { class: 'col', style: { flex: '1 1 380px' } }, ivM.el), h('div', { class: 'col', style: { flex: '1 1 220px' } }, info))),
+        h('p', { class: 'note', style: { marginTop: '16px' } }, 'σ를 키우면 작은 무늬는 사라지고 큰 블롭에서만 반응합니다. σ가 곧 “얼마나 큰 구조를 찾는가”를 정하는 스케일이며, 4.4절에서 이 σ를 자동으로 고르는 방법을 배웁니다. 행렬식은 SURF(4.4.4)가, LOG는 SIFT의 DOG(4.4.3)가 근사해 씁니다.'));
+      draw();
+    },
+  });
+
+  // ================= 4.2.4 SUSAN =================
+  function susanScene(n = 26) {
+    const f = CV.zeros(n, n, 90), tri = [[4, 13], [20, 3], [20, 23]];
+    const sgn = (p, a, b) => (p[1] - b[1]) * (a[0] - b[0]) - (a[1] - b[1]) * (p[0] - b[0]);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const p = [y, x], d1 = sgn(p, tri[0], tri[1]), d2 = sgn(p, tri[1], tri[2]), d3 = sgn(p, tri[2], tri[0]);
+      if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) f[y][x] = 210;
+    }
+    return f;
+  }
+  const SPTS = { a: [20, 3], b: [12, 8], c: [6, 4] };
+  APP.mod({
+    id: 'susan', ch: '4', num: '4.2.4', title: '슈산 (SUSAN)', src: '4강 p.21 · 식 (4.14)(4.15), 그림 4-7·4-8', star: true,
+    blurb: '원형 마스크 안에서 중심과 밝기가 비슷한 화소의 넓이(USAN)를 세기. 넓이가 작을수록 코너.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '미분을 쓰지 않는 방법입니다. 7×7 원형 마스크(넓이 37)를 화소 r<sub>0</sub>에 놓고, 중심과 밝기 차이가 t<sub>1</sub> 이하인 화소 수 <b>usan_area</b>를 셉니다. 평탄한 곳(c)은 거의 37, 에지(b)는 약 절반, 코너(a)는 그보다 더 작습니다. 그래서 usan_area가 t<sub>2</sub> 이하일 때 <b>q − usan_area</b>를 특징 가능성으로 씁니다 (Small Univalue Segment Assimilating Nucleus).',
+        formulas: [
+          [R`$$usan\_area(r_0)=\sum_r s(r,r_0),\qquad s(r,r_0)=\begin{cases}1,&|f(r)-f(r_0)|\le t_1\\0,&\text{그렇지 않으면}\end{cases}$$`, '식 (4.14)'],
+          [R`$$C=\begin{cases}q-usan\_area(r_0),&usan\_area(r_0)\le t_2\\0,&\text{그렇지 않으면}\end{cases}$$`, '식 (4.15)'],
+        ],
+      });
+      let noise = 0, f = susanScene(), pt = SPTS.a.slice(), t1 = 27, t2 = 18, frame = null, res = null;
+      const mk = () => { const g = susanScene(), r = UI.rng(3); return noise ? g.map(rw => rw.map(v => Math.round(CV.clamp(v + (r() - 0.5) * 2 * noise, 0, 255)))) : g; };
+      const CODE = [
+        'usan_area = 0;',
+        'for(r = 원형 마스크의 37칸) {       // 그림 4-8',
+        '  if(|f(r) − f(r0)| ≤ t1) s = 1;   // 식 (4.14)',
+        '  else s = 0;',
+        '  usan_area += s;',
+        '}',
+        'if(usan_area ≤ t2) C = q − usan_area;   // 식 (4.15), q = t2',
+        'else C = 0;',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '한 점의 USAN 넓이와 C', render: fr => { frame = fr; draw(); } });
+      const n = f.length;
+      const gF = UI.GridView({ rows: n, cols: n, cs: 19, fs: 8, axes: false, label: '영상', cell: (y, x) => {
+        const s = { bg: UI.grayBg(f[y][x]) };
+        const j = y - pt[0], i = x - pt[1];
+        if (Math.abs(j) <= 3 && Math.abs(i) <= 3 && CV.SUSAN_MASK[j + 3][i + 3] && frame && frame.done) {
+          const k = (j + 3) * 7 + (i + 3), d = frame.done.get(k);
+          if (d !== undefined) s.bg = d ? 'color-mix(in srgb, var(--ok) 55%, var(--cell-bg))' : 'color-mix(in srgb, var(--bad) 45%, var(--cell-bg))';
+          else s.cls = 'win';
+          if (frame.cur === k) s.cls = 'cur';
+        }
+        if (j === 0 && i === 0) { s.cls = 'cur'; s.t = '●'; s.color = 'var(--orange)'; }
+        const nm = Object.keys(SPTS).find(kk => SPTS[kk][0] === y && SPTS[kk][1] === x); if (nm) s.badge = nm;
+        return s;
+      }, onClick: (y, x) => { pt = [y, x]; rebuild(); } });
+      const ivC = UI.FeatView({ width: 300 }), ivA = UI.FeatView({ width: 300 });
+      function rebuild() {
+        res = CV.susan(f, t1, t2);
+        const [y0, x0] = pt, c0 = f[y0][x0], done = new Map(), fr = [];
+        let area = 0;
+        fr.push({ line: 1, done: new Map(done), vars: { r0: `(${y0},${x0})`, 'f(r0)': c0, t1, usan_area: 0 }, note: `중심 r0 = (${y0}, ${x0}), 밝기 ${c0}. 마스크 안 37칸을 하나씩 비교합니다.` });
+        for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) {
+          if (!CV.SUSAN_MASK[j + 3][i + 3]) continue;
+          const y = y0 + j, x = x0 + i, k = (j + 3) * 7 + (i + 3);
+          if (!CV.inside(f, y, x)) { fr.push({ line: 2, cur: k, done: new Map(done), vars: { r: `(${y},${x})`, usan_area: area }, note: `(${y}, ${x})는 영상 밖이라 세지 않습니다.` }); continue; }
+          const d = Math.abs(f[y][x] - c0), s = d <= t1 ? 1 : 0;
+          area += s; done.set(k, s);
+          fr.push({ line: s ? [3, 5] : [4, 5], cur: k, done: new Map(done), vars: { r: `(${y},${x})`, 'f(r)': f[y][x], '|f(r)−f(r0)|': d, s, usan_area: area }, note: `|${f[y][x]} − ${c0}| = ${d} ${s ? '≤' : '>'} t1=${t1} → s = ${s}${s ? ' (초록: 중심과 비슷)' : ' (빨강: 다름)'}` });
+        }
+        const C = area <= t2 ? t2 - area : 0;
+        fr.push({ line: area <= t2 ? 7 : 8, done: new Map(done), vars: { usan_area: area, t2, q: t2, C }, note: `usan_area = <b>${area}</b> ${area <= t2 ? `≤ t2=${t2} → C = ${t2} − ${area} = <b>${C}</b>` : `> t2=${t2} → C = 0`}. ${area >= 30 ? '거의 다 비슷 → 평탄한 곳' : area >= 15 ? '절반 정도 → 에지' : '절반보다 훨씬 작음 → 코너'}` });
+        st.load(fr, 'end');
+        ivA.draw(res.area, 'norm', { width: 300, grid: true, marks: [{ kind: 'cross', y: y0, x: x0, color: '--orange', size: 5 }] }); ivA.setCaption('usan_area 맵 (밝을수록 넓음)');
+        const peaks = CV.localMax(res.C, 0, 8);
+        ivC.draw(res.C, 'norm', { width: 300, grid: true, marks: peaks.map(([y, x]) => ({ y, x, r: 0.9, color: '--orange' })) }); ivC.setCaption('C 맵 + 지역 최대(원)'); ivC.setInfo(`${peaks.length}개`);
+      }
+      function draw() { gF.draw(); }
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.segmented([['a', '점 a (코너)'], ['b', '점 b (에지)'], ['c', '점 c (평탄)']], 'a', v => { pt = SPTS[v].slice(); rebuild(); }),
+            UI.slider({ label: 't1', min: 5, max: 150, step: 1, value: t1, id: 'su-t1', oninput: v => { t1 = v; rebuild(); } }), UI.slider({ label: 't2 (= q)', min: 5, max: 37, step: 1, value: t2, id: 'su-t2', oninput: v => { t2 = v; rebuild(); } }), UI.slider({ label: '잡음', min: 0, max: 60, step: 5, value: 0, id: 'su-n', oninput: v => { noise = v; f = mk(); rebuild(); } })),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '그림 4-7 같은 삼각형 — 클릭해서 중심 r0를 옮기기. 초록: s=1, 빨강: s=0'), gF.el),
+              h('div', { class: 'col' }, ivA.el, ivC.el))),
+          h('div', { class: 'card' }, h('h3', {}, '원형 마스크', h('small', {}, '그림 4-8 · 넓이 37')), (() => { const g = UI.GridView({ rows: 7, cols: 7, cs: 26, fs: 12, axes: false, cell: (y, x) => ({ t: CV.SUSAN_MASK[y][x] || '', cls: CV.SUSAN_MASK[y][x] ? '' : 'dim' }) }); g.draw(); return g.el; })(),
+            h('p', { class: 'caption' }, '교재는 q와 t2를 따로 적었지만 원 논문(Smith & Brady, 1997)은 둘 다 같은 기하 임계값 g(코너는 최대 넓이의 절반 정도)를 씁니다. 여기서는 q = t2로 두었습니다. 잡음을 올려 보면 미분을 쓰지 않아도 t1이 너무 작으면 결과가 흔들리는 것을 볼 수 있습니다.'))),
+        h('div', { class: 'stack' }, st.panel)));
+      rebuild();
+    },
+  });
+
+  // ================= 4.3 localisation =================
+  APP.mod({
+    id: 'locate', ch: '4', num: '4.3', title: '위치 찾기 (비최대 억제)', src: '4강 p.22–26 · 알고리즘 4-1, 그림 4-9~4-11', star: true,
+    blurb: '특징 가능성 맵에서 지역 최대만 남기기. 회전에는 불변, 스케일에는 불변이 아님을 직접 확인.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '특징 가능성 C는 코너 주위에서 <b>덩어리로</b> 커지므로 대표점 하나를 골라야 합니다. 알고리즘 4-1은 C가 임계값 T를 넘고 <b>이웃보다 클 때만</b> 특징점으로 취합니다 (비최대 억제). 아래 맵은 예제 4-2 영상에 식 (4.9)를 적용한 그림 4-9(a)입니다.',
+        formulas: [
+          [R`$$\text{모라벡 } C=\min(S(0,1),S(0,-1),S(1,0),S(-1,0))$$`, '(4.2)'],
+          [R`$$\text{해리스 } C=(pq-r^2)-k(p+q)^2$$`, '(4.9)'],
+          [R`$$\text{헤시안 } C=d_{yy}d_{xx}-d_{yx}^2$$`, '(4.12)'],
+          [R`$$\text{LOG } C=d_{yy}+d_{xx}$$`, '(4.13)'],
+          [R`$$\text{슈산 } C=q-usan\_area\ (\le t_2)$$`, '(4.15)'],
+        ],
+      });
+      const Cm = CV.harris(APP.parseGrid(F43)).C;
+      let T = 0.02, nb = 4, frame = null;
+      const CODE = [
+        'for(j=0 to N-1) for(i=0 to M-1)   // 1~3행: 특징 가능성 맵',
+        '  (j,i)의 C를 계산하여 m(j,i)에 대입한다.',
+        'F = ∅;   // 공집합으로 시작',
+        'for(j=1 to N-2)',
+        '  for(i=1 to M-2) {',
+        '    c = m(j,i);',
+        '    if((c>T) and (c>m(j,i+1)) and (c>m(j,i-1)) and (c>m(j+1,i)) and (c>m(j-1,i)))  // 4-이웃',
+        '      F = F ∪ (j,i);   // 특징점으로 판정',
+        '  }',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '알고리즘 4-1 지역 특징 검출', render: fr => { frame = fr; draw(); } });
+      const NB4 = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      const gM = UI.GridView({ rows: 12, cols: 12, cs: 42, fs: 10, label: '특징 가능성 맵 m', cell: (y, x) => {
+        const v = Cm[y][x], s = { t: f3(v), ...APP.signedCell(v, 0.2) };
+        if (frame && frame.F && frame.F.some(([a, b]) => a === y && b === x)) { s.bold = true; s.badge = '★'; }
+        if (frame && frame.j !== undefined) { if (y === frame.j && x === frame.i) s.cls = 'cur'; else if ((nb === 8 ? CV.DIR8 : NB4).some(([a, b]) => frame.j + a === y && frame.i + b === x)) s.cls = 'win'; }
+        return s;
+      } });
+      const fBox = h('div');
+      function rebuild() {
+        const F = [], fr = [{ line: [1, 2], F: [], note: '예제 4-2 영상에 해리스 식 (4.9)를 적용한 맵입니다 (k=0.04). 굵은 지역 최대점이 어디인지 예상해 보세요.' }, { line: 3, F: [], vars: { T, '|F|': 0 }, note: 'F를 공집합으로 시작합니다.' }];
+        const N = nb === 8 ? CV.DIR8 : NB4;
+        for (let j = 1; j < 11; j++) for (let i = 1; i < 11; i++) {
+          const c = Cm[j][i], big = c > T, beat = N.map(([a, b]) => c > Cm[j + a][i + b]), ok = big && beat.every(Boolean);
+          if (ok) F.push([j, i]);
+          if (!big && Math.abs(c) < 1e-9) continue;
+          fr.push({ line: ok ? [6, 7, 8] : [6, 7], j, i, F: F.slice(), vars: { j, i, c: +c.toFixed(3), 'c > T': big ? '예' : '아니오', '이웃보다 큼': beat.filter(Boolean).length + '/' + N.length, '|F|': F.length }, note: big ? (ok ? `c = ${c.toFixed(3)} > T이고 ${N.length}개 이웃보다 모두 큼 → <b>특징점 (${j}, ${i})</b>` : `c = ${c.toFixed(3)} > T지만 이웃 중 ${N.length - beat.filter(Boolean).length}개가 같거나 큼 → 억제`) : `c = ${c.toFixed(3)} ≤ T=${T} → 탈락` });
+        }
+        fr.push({ line: 9, F: F.slice(), vars: { '|F|': F.length }, note: `특징점 ${F.length}개: ${F.map(p => `(${p[0]},${p[1]})`).join(', ')} — 교재 그림 4-9(b)는 세 꼭짓점 (3,3), (7,3), (7,7).` });
+        st.load(fr, frame ? Math.min(st.i, fr.length - 1) : 0);
+      }
+      function draw() { gM.draw(); fBox.replaceChildren(h('span', { class: 'caption' }, `F = { ${(frame && frame.F || []).map(p => `(${p[0]},${p[1]})`).join(', ')} }`)); }
+      // invariance experiment
+      let meas = 'harris', deg = 0, scl = 1;
+      const MEAS = { moravec: '모라벡', harris: '해리스', det: '헤시안 det', log: 'LOG', susan: '슈산' };
+      const ivA = UI.FeatView({ width: 400 }), ivB = UI.FeatView({ width: 400 }), rep = h('div');
+      function detect(g) {
+        let C;
+        if (meas === 'moravec') C = CV.moravecMap(g, 2);
+        else if (meas === 'harris') C = CV.harris(g.map(r => r.map(v => v / 255)), { G: CV.gaussKernel2D(1.5), border: 'replicate' }).C;
+        else if (meas === 'det') C = CV.hessian(g, 2).det;
+        else if (meas === 'log') C = CV.hessian(g, 2).lap.map(r => r.map(Math.abs));
+        else C = CV.susan(g, 25, 18).C;
+        const hh = g.length, ww = g[0].length;
+        return CV.localMax(C, 0.08 * Math.max(...C.flat()), 8).filter(([y, x]) => y >= 3 && x >= 3 && y < hh - 3 && x < ww - 3);
+      }
+      function inv() {
+        const g = gray(), W = CV.warp(g, deg, scl), A = detect(g), B = detect(W.img);
+        const hb = W.img.length, wb = W.img[0].length;
+        const mapped = A.map(([y, x]) => W.map(y, x)).filter(([y, x]) => y >= 3 && x >= 3 && y < hb - 3 && x < wb - 3);
+        const hit = mapped.filter(([y, x]) => B.some(([b, a]) => (b - y) ** 2 + (a - x) ** 2 <= 2.25));
+        ivA.draw(g, 'gray', { marks: A.map(([y, x]) => ({ y, x, r: 1.6, color: '--orange' })) }); ivA.setCaption('원래 영상'); ivA.setInfo(`${A.length}개`);
+        ivB.draw(W.img, 'gray', { width: 400 * scl, marks: [...mapped.map(([y, x]) => ({ kind: 'cross', y, x, color: '--neg', size: 4 })), ...B.map(([y, x]) => ({ y, x, r: 1.6, color: '--orange' }))] }); ivB.setCaption(`${deg}° 회전 · ${scl}배`); ivB.setInfo(`${B.length}개`);
+        const pct = mapped.length ? Math.round(hit.length / mapped.length * 100) : 0;
+        rep.replaceChildren(h('span', { class: pct >= 60 ? 'pill ok' : pct >= 35 ? 'pill hot' : 'pill bad' }, `반복률 ${pct}%`), h('span', { class: 'caption' }, `  원래 점을 변환한 위치(파랑 +) ${mapped.length}개 중 ${hit.length}개 근처(1.5화소)에서 다시 검출(주황 원)`));
+      }
+      UI.onImage(inv);
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.slider({ label: '임계값 T', min: 0, max: 0.15, step: 0.005, value: T, id: 'lc-t', fmt: v => v.toFixed(3), oninput: v => { T = v; rebuild(); } }), UI.segmented([[4, '4-이웃 (교재)'], [8, '8-이웃']], 4, v => { nb = v; rebuild(); })),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '그림 4-9(a) — 주황 칸: 지금 화소, 음영: 비교하는 이웃, ★: 특징점'), gM.el, fBox))),
+          h('div', { class: 'card' }, h('h3', {}, '이동·회전에는 불변, 스케일에는?', h('small', {}, '그림 4-10 · 4-11')),
+            h('div', { class: 'controls' }, UI.imagePicker(), UI.labeled('측정', UI.select(Object.entries(MEAS), meas, v => { meas = v; inv(); }, 'lc-m')),
+              UI.slider({ label: '회전', min: 0, max: 90, step: 5, value: 0, id: 'lc-r', fmt: v => v + '°', oninput: v => { deg = v; inv(); } }), UI.slider({ label: '스케일', min: 0.4, max: 1, step: 0.05, value: 1, id: 'lc-s', fmt: v => v.toFixed(2), oninput: v => { scl = v; inv(); } })),
+            h('div', { style: { margin: '8px 0' } }, rep),
+            h('div', { class: 'row' }, h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivA.el), h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivB.el)),
+            h('p', { class: 'caption' }, '회전만 하면 반복률이 높게 유지됩니다(모라벡은 네 방향만 봐서 상대적으로 약함). 스케일을 줄이면 연산자 크기가 고정돼 있어 같은 점이 잘 안 잡힙니다 — 그림 4-11처럼 작은 삼각형에는 작은 연산자, 큰 삼각형에는 큰 연산자가 필요합니다. 이것이 4.4절의 출발점입니다.'))),
+        h('div', { class: 'stack' }, st.panel)));
+      rebuild(); inv();
+    },
+  });
+})();
+
+// Chapter 4 modules, part B: scale space, Harris-Laplace, SIFT, SURF, detector comparison
+(() => {
+  const { h, fmt } = UI;
+  const R = String.raw;
+  const gray = () => UI.currentImage().gray;
+  const SIG4 = [1.6, 2.0159, 2.5398, 3.2, 4.0317, 5.0797];
+  const ms = fn => { const t = performance.now(); const r = fn(); return [r, performance.now() - t]; };
+  // synthetic test scene: blobs and squares of several sizes on a mid-grey background
+  function blobScene() {
+    const H = 96, W = 128, f = CV.zeros(H, W, 70);
+    const disc = (cy, cx, r, v) => { for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if ((y - cy) ** 2 + (x - cx) ** 2 <= r * r) f[y][x] = v; };
+    const sq = (y0, x0, s, v) => { for (let y = y0; y < y0 + s; y++) for (let x = x0; x < x0 + s; x++) f[y][x] = v; };
+    disc(24, 24, 4, 210); disc(26, 62, 7, 210); disc(30, 104, 12, 30);
+    sq(60, 10, 10, 220); sq(56, 44, 20, 220); sq(64, 86, 6, 20); sq(78, 104, 12, 200);
+    return f;
+  }
+
+  // ================= 4.4.1 scale space =================
+  APP.mod({
+    id: 'scalespace', ch: '4', num: '4.4.1', title: '스케일 공간', src: '4강 p.27–31 · 알고리즘 4-2, 식 (4.17), 그림 4-12~4-15',
+    blurb: '스케일 축 t를 더한 3차원 공간 (y,x,t). 정규 라플라시안이 극점을 만드는 σ가 곧 물체의 스케일.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '카메라가 멀어지면 물체가 작아지고 세부가 사라집니다(그림 4-12). 크기가 고정된 연산자로는 이를 따라갈 수 없으므로, 영상을 여러 스케일로 만든 <b>스케일 공간 (y, x, t)</b>에서 <b>3차원 극점</b>을 찾습니다(알고리즘 4-2). 스케일 축을 따라 <b>정규 라플라시안</b>을 재면 물체 크기에 맞는 σ에서 극점이 생깁니다. σ²를 곱하는 “정규화”가 없으면 값이 σ에 따라 계속 줄어들기만 해서 극점이 생기지 않습니다.',
+        formulas: [[R`$$\nabla^2_{norm}f=\sigma^2\,\big|\,d_{yy}(\sigma)+d_{xx}(\sigma)\,\big|$$`, '식 (4.17)'], [R`$$\text{반지름 } r \text{ 인 원판의 중심: } \sigma^2\nabla^2 \propto \tfrac{r^2}{\sigma^2}e^{-r^2/2\sigma^2}\ \Rightarrow\ \sigma^\ast=\tfrac{r}{\sqrt2}$$`, '극점 위치 (원판 모델)']],
+      });
+      // (1) the two ways to build multi-scale images
+      const strip = h('div', { class: 'row' });
+      function multi() {
+        const g = gray(), cells = [];
+        for (const s of [0, 1, 2, 3, 5]) { const v = UI.FeatView({ width: 170 }); v.draw(s ? CV.gaussianBlur(g, s) : g, 'gray', { width: 170 }); v.setCaption(s ? `σ=${s}` : '원래 영상'); cells.push(v.el); }
+        const row2 = []; let p = g;
+        for (let k = 0; k < 5; k++) { const v = UI.FeatView({ width: 170 / 2 ** k }); v.draw(p, 'gray', { width: 170 / 2 ** k }); v.setCaption(`${p[0].length}×${p.length}`); row2.push(v.el); p = CV.pyramidDown(p); }
+        strip.replaceChildren(h('div', { class: 'col' }, h('span', { class: 'caption' }, '(a) 가우시안 스무딩 — σ가 연속값, 크기 그대로'), h('div', { class: 'row', style: { gap: '8px' } }, ...cells)),
+          h('div', { class: 'col' }, h('span', { class: 'caption' }, '(b) 피라미드 — ½씩 줄어 스케일이 이산적'), h('div', { class: 'row', style: { gap: '8px', alignItems: 'flex-end' } }, ...row2)));
+      }
+      UI.onImage(multi);
+      // (2) Fig 4-15 experiment with two discs
+      let r1 = 5, r2 = 8, norm = true, sigNow = 3;
+      const cvs = h('canvas'), ivL = UI.FeatView({ width: 380 }), ivO = UI.FeatView({ width: 380 }), msg = h('p', { class: 'caption' });
+      const scene = () => { const f = CV.zeros(48, 96, 0); for (let y = 0; y < 48; y++) for (let x = 0; x < 96; x++) if ((y - 24) ** 2 + (x - 28) ** 2 <= r1 * r1 || (y - 24) ** 2 + (x - 70) ** 2 <= r2 * r2) f[y][x] = 1; return f; };
+      function curve() {
+        const f = scene(), S = []; for (let s = 1; s <= 10.001; s += 0.25) S.push(+s.toFixed(2));
+        const v1 = S.map(s => CV.normLapAt(f, 24, 28, s) / (norm ? 1 : s * s)), v2 = S.map(s => CV.normLapAt(f, 24, 70, s) / (norm ? 1 : s * s));
+        const top = Math.max(...v1, ...v2) * 1.1 || 1, arg = v => S[v.indexOf(Math.max(...v))];
+        const p1 = arg(v1), p2 = arg(v2);
+        UI.plot(cvs, { w: 520, h: 230, x: [1, 10], y: [0, top], series: [{ data: S.map((s, i) => [s, v1[i]]), color: '--neg' }, { data: S.map((s, i) => [s, v2[i]]), color: '--orange' }], vlines: norm ? [{ x: p1, color: '--neg', dash: [4, 3], label: `σ=${p1}` }, { x: p2, color: '--orange', dash: [4, 3], label: `σ=${p2}` }, { x: sigNow, color: '--faint', w: 1 }] : [{ x: sigNow, color: '--faint', w: 1 }], legend: [[`작은 원 r=${r1}`, '--neg'], [`큰 원 r=${r2}`, '--orange']], xfmt: v => 'σ ' + v });
+        msg.innerHTML = norm ? `극점: 작은 원 σ=<b>${p1}</b> (이론 r/√2 = ${(r1 / Math.SQRT2).toFixed(2)}), 큰 원 σ=<b>${p2}</b> (이론 ${(r2 / Math.SQRT2).toFixed(2)}). 원이 클수록 극점의 σ도 커집니다 → <b>극점의 σ가 물체의 스케일</b>. 두 원의 극점 높이가 거의 같은 것도 정규화 덕분입니다.` : 'σ²를 곱하지 않으면 σ가 커질수록 스무딩 때문에 값이 계속 작아져 큰 물체에 맞는 극점이 사라집니다. 스케일끼리 공정하게 비교하려면 σ²를 곱해야 합니다.';
+        const L = CV.normLap(f, sigNow);
+        ivO.draw(f, 'gray', { width: 380, marks: [{ y: 24, x: 28, r: p1 * Math.SQRT2, color: '--neg' }, { y: 24, x: 70, r: p2 * Math.SQRT2, color: '--orange' }] }); ivO.setCaption('원래 영상 + 극점 σ로 그린 원 (반지름 √2σ)');
+        ivL.draw(L, 'abs', { width: 380 }); ivL.setCaption(`σ=${sigNow}에서 정규 라플라시안 영상 (그림 4-15(b) 한 장)`);
+      }
+      root.append(
+        h('div', { class: 'card' }, h('h3', {}, '다중 스케일 영상을 만드는 두 방법', h('small', {}, '그림 4-13')), h('div', { class: 'controls' }, UI.imagePicker()), h('div', { style: { marginTop: '10px' } }, strip)),
+        h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', {}, 't 축에서 지역 극점 찾기', h('small', {}, '그림 4-15 실험')),
+          h('div', { class: 'controls' }, UI.slider({ label: '작은 원 r', min: 2, max: 9, step: 1, value: r1, id: 'ss-r1', oninput: v => { r1 = v; curve(); } }), UI.slider({ label: '큰 원 r', min: 4, max: 14, step: 1, value: r2, id: 'ss-r2', oninput: v => { r2 = v; curve(); } }),
+            UI.segmented([[true, 'σ² 곱함 (정규)'], [false, 'σ² 안 곱함']], true, v => { norm = v; curve(); }), UI.slider({ label: '보는 σ', min: 1, max: 10, step: 0.5, value: sigNow, id: 'ss-s', fmt: v => v.toFixed(1), oninput: v => { sigNow = v; curve(); } })),
+          h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 480px' } }, cvs, msg), h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivO.el, ivL.el))),
+        h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', {}, '알고리즘 4-2 다중 스케일 접근 방법'),
+          h('pre', { class: 'code', style: { margin: 0 } }, '1  f에서 다중 스케일 영상 M = {f^s0, f^s1, f^s2, …}를 구성한다.   // f^si는 스케일이 si인 영상\n2  M에서 3차원 극점을 찾아 특징점 집합 F로 취한다.             // 극점 (y,x,s)는 스케일 불변이어야 함'),
+          h('p', { class: 'caption' }, '여기서 극점은 지역 최대 또는 최소점입니다. (y, x)뿐 아니라 이웃 스케일과도 비교합니다 — 4.4.2는 공간과 스케일을 따로, 4.4.3 SIFT는 26개 이웃과 한꺼번에 비교합니다.')));
+      multi(); curve();
+    },
+  });
+
+  // ================= 4.4.2 Harris-Laplace =================
+  APP.mod({
+    id: 'harlap', ch: '4', num: '4.4.2', title: '해리스 라플라스', src: '4강 p.32–33 · 식 (4.18)(4.19), 알고리즘 4-3', star: true,
+    blurb: '공간에서는 다중 스케일 해리스, 스케일 축에서는 정규 라플라시안. 극점을 반복해서 다듬기.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '(y, x, t) 3차원에서 극점을 찾는 해리스 라플라스의 전략: <b>영상 공간에서는 해리스</b>(위치를 잘 찾음), <b>스케일 축에서는 정규 라플라시안</b>(스케일을 잘 찾음)을 씁니다. 단계 1에서 σ<sub>n</sub> = ξ<sup>n</sup>σ<sub>0</sub>마다 다중 스케일 해리스 맵의 지역 최대를 모으고, 단계 2에서 각 점마다 [0.7σ, 1.4σ] 구간의 정규 라플라시안 극점으로 스케일을 고친 뒤 그 스케일에서 위치를 다시 찾기를 <b>수렴할 때까지</b> 반복합니다.',
+        formulas: [
+          [R`$$\mathbf{A}_{scale\_space}=\sigma_D^2\,G(\sigma_I)\circledast\begin{pmatrix}d_y^2(\sigma_D)&d_y(\sigma_D)d_x(\sigma_D)\\d_y(\sigma_D)d_x(\sigma_D)&d_x^2(\sigma_D)\end{pmatrix}=\begin{pmatrix}p&r\\r&q\end{pmatrix}$$`, '식 (4.18)'],
+          [R`$$C=(pq-r^2)-k(p+q)^2$$`, '식 (4.19)'],
+        ],
+      });
+      let xi = 1.4, s = 0.7, s0 = 1.0, N = 6, thr = 0.05, frame = null, data = null;
+      const CODE = [
+        'F_temp = ∅;',
+        'for(n=0 to N) {   // 단계 1: 스케일 공간에서 지역 극점 수집하기',
+        '  σn = ξⁿ·σ0;',
+        '  σI = σn;  σD = s·σn;',
+        '  식 (4.19)를 이용하여 특징 가능성 맵을 계산한다.',
+        '  맵에서 지역 극점 (y,x)를 구하고, (y,x,σI)를 F_temp에 추가한다.',
+        '}',
+        '// 단계 2: 스케일 선택 (극점 미세 조정)',
+        'F = ∅;',
+        'for(F_temp의 특징점 e=(y,x,σ) 각각에 대해)',
+        '  while(true) {',
+        '    [0.7σ, 1.4σ] 구간에서 정규 라플라시안의 지역 극점 σnew를 찾는다.',
+        '    if(못 찾음) {e를 버린다; break;}',
+        '    else σnew에 대해 (y,x) 주위에서 새로운 극점 (ynew,xnew)를 찾는다.',
+        '    if((y,x,σ)=(ynew,xnew,σnew)) {F = F∪(y,x,σ); break;}  // 수렴',
+        '    else (y,x,σ) = (ynew,xnew,σnew);   // 새로 찾은 것으로 반복',
+        '  }',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '알고리즘 4-3 해리스 라플라스', render: fr => { frame = fr; draw(); } });
+      const iv = UI.FeatView({ width: 520 }), ivM = UI.FeatView({ width: 330 }), cvs = h('canvas'), sumBox = h('div');
+      function compute() {
+        const f = blobScene(), maps = [], Ftemp = [];
+        const sig = Array.from({ length: N + 1 }, (_, n) => s0 * xi ** n);
+        const lapCache = new Map(), lapAt = (y, x, sg) => { const key = `${y},${x},${sg.toFixed(3)}`; if (!lapCache.has(key)) lapCache.set(key, CV.normLapAt(f, y, x, sg)); return lapCache.get(key); };
+        sig.forEach((sn, n) => {
+          const C = CV.harrisScale(f, sn, s * sn), mx = Math.max(...C.flat());
+          const pts = CV.localMax(C, thr * mx, 8);
+          maps.push({ n, sn, C, pts });
+          pts.forEach(([y, x]) => Ftemp.push({ y, x, sg: sn, n }));
+        });
+        // stage 2
+        const F = [], trace = [];
+        const lapMap = new Map(), harrisAt = sn => { const k = sn.toFixed(3); if (!lapMap.has(k)) lapMap.set(k, CV.harrisScale(f, sn, s * sn)); return lapMap.get(k); };
+        for (const e of Ftemp) {
+          let { y, x, sg } = e; const steps = [];
+          for (let it = 0; it < 8; it++) {
+            const S = []; for (let t = 0.7; t <= 1.401; t += 0.1) S.push(sg * t);
+            const L = S.map(v => lapAt(y, x, v));
+            let best = -1; for (let k = 1; k < S.length - 1; k++) if (L[k] > L[k - 1] && L[k] > L[k + 1] && (best < 0 || L[k] > L[best])) best = k;
+            if (best < 0) { steps.push({ y, x, sg, S, L, fail: true }); break; }
+            const sn = S[best], C = harrisAt(sn);
+            let ny = y, nx = x, bv = -Infinity;
+            for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const yy = y + j, xx = x + i; if (CV.inside(C, yy, xx) && C[yy][xx] > bv) { bv = C[yy][xx]; ny = yy; nx = xx; } }
+            const conv = ny === y && nx === x && Math.abs(sn - sg) < 1e-9;
+            steps.push({ y, x, sg, S, L, best, sn, ny, nx, conv });
+            if (conv) { F.push({ y, x, sg }); break; }
+            y = ny; x = nx; sg = sn;
+          }
+          trace.push({ e, steps });
+        }
+        // merge duplicates converging to the same (y,x,σ)
+        const uniq = []; for (const p of F) if (!uniq.some(q => Math.abs(q.y - p.y) <= 1 && Math.abs(q.x - p.x) <= 1 && Math.abs(q.sg - p.sg) < 0.2 * p.sg)) uniq.push(p);
+        data = { f, sig, maps, Ftemp, F: uniq, trace };
+        const fr = [{ line: 1, phase: 1, note: `ξ=${xi}, s=${s}, σ0=${s0}, N=${N} — 원과 사각형의 크기가 서로 다른 합성 영상입니다.`, vars: { ξ: xi, s, σ0: s0, N } }];
+        maps.forEach(mp => fr.push({ line: [3, 4, 5, 6], phase: 1, n: mp.n, vars: { n: mp.n, σn: +mp.sn.toFixed(3), σI: +mp.sn.toFixed(3), σD: +(s * mp.sn).toFixed(3), '극점 수': mp.pts.length, '|F_temp|': maps.slice(0, mp.n + 1).reduce((a, b) => a + b.pts.length, 0) }, note: `σ<sub>I</sub>=${mp.sn.toFixed(2)}, σ<sub>D</sub>=${(s * mp.sn).toFixed(2)}에서 해리스 맵의 지역 최대 ${mp.pts.length}개를 F_temp에 넣습니다. σ가 커질수록 작은 구조는 사라지고 큰 구조의 점이 남습니다.` }));
+        fr.push({ line: [8, 9], phase: 2, note: `F_temp에 ${Ftemp.length}개 — 같은 코너가 여러 스케일에서 중복으로 잡혀 있습니다. 이제 각 점의 스케일을 정규 라플라시안으로 고릅니다.`, vars: { '|F_temp|': Ftemp.length } });
+        const shown = trace.slice(0, 40);
+        shown.forEach((t, ti) => t.steps.forEach((sp, si) => fr.push({ line: sp.fail ? [12, 13] : sp.conv ? [12, 14, 15] : [12, 14, 16], phase: 2, ti, si, sp, vars: { e: `#${ti + 1}`, '반복': si + 1, '(y,x)': `(${sp.y},${sp.x})`, σ: +sp.sg.toFixed(3), σnew: sp.fail ? '-' : +sp.sn.toFixed(3), '(ynew,xnew)': sp.fail ? '-' : `(${sp.ny},${sp.nx})` }, note: sp.fail ? `[0.7σ, 1.4σ] = [${(0.7 * sp.sg).toFixed(2)}, ${(1.4 * sp.sg).toFixed(2)}] 안에 정규 라플라시안 극점이 없음 → <b>버림</b> (스케일이 정해지지 않는 점)` : sp.conv ? `σnew = ${sp.sn.toFixed(2)}, 위치도 그대로 → <b>수렴, F에 추가</b>` : `σ ${sp.sg.toFixed(2)} → ${sp.sn.toFixed(2)}, 위치 (${sp.y},${sp.x}) → (${sp.ny},${sp.nx})로 옮겨 반복` })));
+        fr.push({ line: 17, phase: 3, vars: { '|F_temp|': Ftemp.length, '|F| (중복 합침)': uniq.length }, note: `최종 특징점 ${uniq.length}개 (같은 곳으로 수렴한 중복은 합침). 원 반지름을 √2σ로 그렸습니다 — 물체 크기를 따라 원 크기가 달라집니다. ${trace.length > 40 ? `(단계 실행은 처음 40개 점만 보여 줍니다)` : ''}` });
+        st.load(fr, 0);
+        sumBox.replaceChildren(UI.dataTable(['n', 'σI', 'σD', '지역 최대'], maps.map(mp => [mp.n, mp.sn.toFixed(2), (s * mp.sn).toFixed(2), mp.pts.length])));
+      }
+      function draw() {
+        if (!data || !frame) return;
+        const { f, maps, Ftemp, F, trace } = data;
+        let marks = [];
+        if (frame.phase === 1 && frame.n !== undefined) {
+          const mp = maps[frame.n];
+          marks = maps.slice(0, frame.n).flatMap(q => q.pts.map(([y, x]) => ({ kind: 'dot', y, x, size: 2, color: '--faint' }))).concat(mp.pts.map(([y, x]) => ({ y, x, r: mp.sn * Math.SQRT2, color: '--orange', w: 1.5 })));
+          ivM.draw(mp.C, 'norm', { width: 330, marks: mp.pts.map(([y, x]) => ({ kind: 'dot', y, x, size: 2.5, color: '--orange' })) }); ivM.setCaption(`σI=${mp.sn.toFixed(2)}의 해리스 맵`);
+        } else if (frame.phase === 2 && frame.sp) {
+          const sp = frame.sp;
+          marks = Ftemp.map(e => ({ kind: 'dot', y: e.y, x: e.x, size: 1.6, color: '--faint' })).concat([{ y: sp.y, x: sp.x, r: sp.sg * Math.SQRT2, color: '--neg', w: 2 }], sp.fail ? [] : [{ y: sp.ny, x: sp.nx, r: sp.sn * Math.SQRT2, color: '--orange', w: 2 }]);
+          UI.plot(cvs, { w: 330, h: 170, x: [sp.S[0], sp.S[sp.S.length - 1]], y: [0, Math.max(...sp.L) * 1.15 || 1], series: [{ data: sp.S.map((v, i) => [v, sp.L[i]]), color: '--neg', type: 'line' }, { data: sp.S.map((v, i) => [v, sp.L[i]]), color: '--neg', type: 'points' }], vlines: sp.fail ? [] : [{ x: sp.sn, color: '--orange', label: 'σnew' }], xfmt: v => v.toFixed(1) });
+        } else {
+          marks = (frame.phase === 3 ? F : []).map(p => ({ y: p.y, x: p.x, r: p.sg * Math.SQRT2, color: '--orange', w: 2 }));
+        }
+        iv.draw(f, 'gray', { marks }); iv.setCaption(frame.phase === 2 ? '파랑: 현재 (y,x,σ) · 주황: 새 (ynew,xnew,σnew)' : frame.phase === 3 ? '최종 특징점 (원 = √2σ)' : '주황: 이번 스케일의 지역 최대 · 회색: 이전 스케일'); iv.setInfo(frame.phase === 3 ? `${F.length}개` : '');
+        cvs.hidden = frame.phase !== 2; ivM.el.hidden = !(frame.phase === 1 && frame.n !== undefined);
+      }
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.slider({ label: 'ξ', min: 1.2, max: 1.6, step: 0.05, value: xi, id: 'hl-xi', fmt: v => v.toFixed(2), oninput: v => { xi = v; compute(); } }), UI.slider({ label: 's', min: 0.5, max: 1, step: 0.05, value: s, id: 'hl-s', fmt: v => v.toFixed(2), oninput: v => { s = v; compute(); } }), UI.slider({ label: 'N', min: 3, max: 7, step: 1, value: N, id: 'hl-n', oninput: v => { N = v; compute(); } }), UI.slider({ label: '해리스 임계값 (×max)', min: 0.01, max: 0.3, step: 0.01, value: thr, id: 'hl-t', fmt: v => v.toFixed(2), oninput: v => { thr = v; compute(); } })),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 420px' } }, iv.el), h('div', { class: 'col', style: { flex: '1 1 300px' } }, ivM.el, h('div', {}, h('span', { class: 'caption' }, '[0.7σ, 1.4σ]에서 정규 라플라시안'), cvs)))),
+          h('div', { class: 'card' }, h('h3', {}, '단계 1 요약'), sumBox, h('p', { class: 'caption' }, '교재 기본값은 ξ=1.4, s=0.7. σD는 미분할 때, σI는 미분 곱을 모을 때(적분) 쓰는 스케일입니다. σD² 곱은 정규 라플라시안의 σ²와 같은 이유(스케일 사이 공정한 비교)입니다.'))),
+        h('div', { class: 'stack' }, st.panel)));
+      compute();
+    },
+  });
+
+  // ================= 4.4.3 SIFT =================
+  APP.mod({
+    id: 'sift', ch: '4', num: '4.4.3', title: 'SIFT 검출', src: '4강 p.34–38 · 식 (4.20)(4.21), 그림 4-16·4-17', star: true,
+    blurb: '피라미드+가우시안 옥타브 → DOG 다섯 장 → 가운데 세 장에서 26-이웃 극점 = 키포인트.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: 'SIFT(Lowe 1999, 2004)는 <b>피라미드와 가우시안을 합친</b> 스케일 공간을 씁니다. 한 옥타브는 σ<sub>i+1</sub> = kσ<sub>i</sub> (σ<sub>0</sub>=1.6, k=2<sup>1/3</sup>)로 스무딩한 <b>여섯 장</b>, 이웃끼리 뺀 <b>DOG 다섯 장</b>으로 이루어지고, σ=3.2 영상을 반으로 줄여 다음 옥타브를 시작합니다. DOG는 정규 라플라시안과 거의 같은 모양이지만 <b>뺄셈만</b> 하므로 매우 빠릅니다. 가운데 세 장의 DOG에서 <b>26개 이웃</b>보다 크거나 작은 점이 키포인트입니다.',
+        formulas: [
+          [R`$$DOG(\sigma_i)=G(\sigma_{i+1})\circledast f-G(\sigma_i)\circledast f=\big(G(k\sigma_i)-G(\sigma_i)\big)\circledast f$$`, '식 (4.20)'],
+          [R`$$(y,x)=(y'\times2^{o},\ x'\times2^{o}),\qquad s=1.6\times2^{\frac{o+i'}{3}}$$`, '식 (4.21)'],
+        ],
+      });
+      let nOct = 2, thr = 0.03, edge = false, sel = 0, frame = null, P = null, K = null, T = 0;
+      const pyr = h('div'), iv = UI.FeatView({ width: 560, onClick: (y, x) => { if (!K.length) return; let b = 0, bd = Infinity; K.forEach((k, i) => { const d = (k.Y - y) ** 2 + (k.X - x) ** 2; if (d < bd) { bd = d; b = i; } }); sel = b; kpSel.value = String(b); steps(); } });
+      const kpSel = h('select', { 'aria-label': '키포인트' }); kpSel.addEventListener('change', () => { sel = +kpSel.value; steps(); });
+      const CODE = [
+        'for(o = 각 옥타브) for(i = 1 to 3) {      // 가운데 세 장의 DOG',
+        '  for(각 화소 (y,x)) {',
+        '    c = DOG_i(y,x);',
+        '    for(n = DOG_{i-1}, DOG_i, DOG_{i+1}의 3×3 이웃 26개)',
+        '      c > n 인가?  c < n 인가?',
+        '    if(c가 26개 모두보다 크거나 모두보다 작음)',
+        '      키포인트 <y,x,o,i> 추가;',
+        '  }',
+        '}',
+        '(y,x) = (y·2^o, x·2^o);  s = 1.6×2^((o+i)/3);   // 식 (4.21)',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '그림 4-17 키포인트 검출', render: fr => { frame = fr; draw(); } });
+      const grids = [-1, 0, 1].map(d => UI.GridView({ rows: 3, cols: 3, cs: 50, fs: 10, axes: false, label: `DOG ${d}`, cell: (y, x) => {
+        if (!frame || !frame.vals) return {};
+        const v = frame.vals[d + 1][y][x], s = { t: v.toFixed(2), ...APP.signedCell(v, frame.amax) };
+        if (d === 0 && y === 1 && x === 1) { s.t = 'X ' + v.toFixed(1); s.cls = 'cur'; return s; }
+        const k = (d + 1) * 9 + y * 3 + x, idx = frame.order.indexOf(k);
+        if (idx >= 0 && idx < frame.done) s.badge = frame.cmp[idx]; if (idx === frame.done - 1) s.cls = 'win';
+        return s;
+      } }));
+      function compute() {
+        let t; [P, t] = ms(() => CV.siftPyramid(gray(), nOct));
+        let t2; [K, t2] = ms(() => CV.siftKeypoints(P, thr * 255, edge ? 10 : 0)); T = t + t2;
+        pyr.replaceChildren(...P.map(O => h('div', { class: 'col', style: { marginBottom: '10px' } }, h('span', { class: 'caption' }, `옥타브 ${O.o} — ${O.gauss[0][0].length}×${O.gauss[0].length}` + (O.o ? ' (옥타브 ' + (O.o - 1) + '의 σ=3.2 영상을 다운샘플링)' : '')),
+          h('div', { class: 'row', style: { gap: '6px' } }, ...O.gauss.map((g, i) => { const v = UI.FeatView({ width: 120 }); v.draw(g, 'gray', { width: 120 }); v.setCaption('σ ' + SIG4[i].toFixed(4)); return v.el; })),
+          h('div', { class: 'row', style: { gap: '6px', paddingLeft: '63px' } }, ...O.dog.map((d, i) => { const v = UI.FeatView({ width: 120 }); v.draw(d, 'signed', { width: 120 }); v.setCaption(`DOG ${i}${i >= 1 && i <= 3 ? ' ●' : ''}`); return v.el; })))),
+        h('p', { class: 'caption' }, '● 표시한 가운데 세 장(DOG 1~3)에서만 극점을 찾습니다. 맨 위·맨 아래 DOG는 위나 아래 이웃이 없기 때문입니다. 옥타브가 바뀌면 σ 숫자는 그대로지만 영상이 절반이라 실제 스케일은 두 배입니다.'));
+        kpSel.replaceChildren(...K.map((k, i) => h('option', { value: String(i) }, `#${i + 1} o=${k.o} i=${k.i} (${k.y},${k.x}) ${k.type > 0 ? '최대' : '최소'}`)));
+        sel = Math.min(sel, Math.max(0, K.length - 1)); kpSel.value = String(sel);
+        steps();
+      }
+      function steps() {
+        const fr = [];
+        const k = K[sel];
+        if (!k) { st.load([{ line: 1, note: '키포인트가 없습니다. 대비 임계값을 낮춰 보세요.' }]); return; }
+        const D = P[k.o].dog, vals = [-1, 0, 1].map(d => [-1, 0, 1].map(j => [-1, 0, 1].map(a => D[k.i + d][k.y + j][k.x + a])));
+        const amax = Math.max(...vals.flat(2).map(Math.abs)), c = vals[1][1][1];
+        const order = []; for (let d = 0; d < 3; d++) for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) if (!(d === 1 && y === 1 && x === 1)) order.push(d * 9 + y * 3 + x);
+        const cmp = order.map(q => { const v = vals[Math.floor(q / 9)][Math.floor(q % 9 / 3)][q % 3]; return c > v ? '<' : c < v ? '>' : '='; });
+        const base = { vals, amax, order, cmp };
+        fr.push({ ...base, done: 0, line: [1, 2, 3], vars: { o: k.o, i: k.i, y: k.y, x: k.x, c: +c.toFixed(3) }, note: `옥타브 ${k.o}의 DOG ${k.i}, 화소 (${k.y}, ${k.x}): c = ${c.toFixed(3)}. 위(DOG ${k.i + 1})·같은 층·아래(DOG ${k.i - 1})의 3×3에서 자신을 뺀 26개와 비교합니다.` });
+        let gt = 0, lt = 0;
+        order.forEach((q, n) => {
+          const d = Math.floor(q / 9), v = vals[d][Math.floor(q % 9 / 3)][q % 3];
+          if (c > v) gt++; else if (c < v) lt++;
+          fr.push({ ...base, done: n + 1, line: [4, 5], vars: { '비교': `${n + 1}/26`, n: +v.toFixed(3), 'c보다 작은 이웃': gt, 'c보다 큰 이웃': lt }, note: `${['아래 DOG', '같은 DOG', '위 DOG'][d]}의 이웃 ${v.toFixed(3)}: c ${c > v ? '>' : c < v ? '<' : '='} n` });
+        });
+        fr.push({ ...base, done: 26, line: [6, 7], vars: { 'c보다 작은 이웃': gt, 'c보다 큰 이웃': lt, 결과: gt === 26 ? '최대' : lt === 26 ? '최소' : '아님' }, note: gt === 26 ? '26개 모두보다 큼 → <b>지역 최대, 키포인트</b>' : lt === 26 ? '26개 모두보다 작음 → <b>지역 최소, 키포인트</b> (DOG는 어두운 블롭에서 최대, 밝은 블롭에서 최소)' : '극점이 아님' });
+        fr.push({ ...base, done: 26, line: 10, vars: { "y'": k.y, "x'": k.x, o: k.o, "i'": k.i, y: k.Y, x: k.X, s: +k.s.toFixed(4) }, note: `(y, x) = (${k.y}×2^${k.o}, ${k.x}×2^${k.o}) = (<b>${k.Y}, ${k.X}</b>), s = 1.6×2^((${k.o}+${k.i})/3) = <b>${k.s.toFixed(4)}</b>. 실제 SIFT는 여기서 2차 함수 맞추기로 y′, x′, i′를 부분 화소까지 다듬지만 이 실습에서는 생략했습니다.` });
+        st.load(fr, 0);
+      }
+      function draw() {
+        grids.forEach(g => g.draw());
+        iv.draw(gray(), 'gray', { marks: K.map((k, i) => ({ y: k.Y, x: k.X, r: k.s * Math.SQRT2, color: i === sel ? '--neg' : k.type > 0 ? '--orange' : '--ok', w: i === sel ? 2.5 : 1.3 })) });
+        iv.setCaption('키포인트 (원 반지름 √2·s) — 주황: DOG 최대, 초록: DOG 최소, 파랑: 선택. 클릭하면 가까운 키포인트 선택'); iv.setInfo(`${K.length}개 · ${T.toFixed(0)} ms`);
+      }
+      UI.onImage(compute);
+      // DOG vs normalised Laplacian (Eq. 4.20)
+      let kk = Math.pow(2, 1 / 3);
+      const dcv = h('canvas');
+      function dogPlot() {
+        const s = 1, xs = []; for (let x = -5; x <= 5.001; x += 0.05) xs.push(x);
+        const g = (x, sg) => Math.exp(-x * x / (2 * sg * sg)) / (Math.sqrt(2 * Math.PI) * sg);
+        const dog = xs.map(x => g(x, s) - g(x, kk * s)), lap = xs.map(x => -(kk - 1) * s * s * ((x * x - s * s) / s ** 4) * g(x, s));
+        const sc = Math.max(...dog.map(Math.abs)), sc2 = Math.max(...lap.map(Math.abs));
+        UI.plot(dcv, { w: 440, h: 200, x: [-5, 5], y: [-0.6, 1.05], series: [{ data: xs.map((x, i) => [x, lap[i] / sc2]), color: '--bad', width: 3 }, { data: xs.map((x, i) => [x, dog[i] / sc]), color: '--neg' }], legend: [['DOG', '--neg'], ['−정규 라플라시안', '--bad']] });
+      }
+      root.append(h('div', { class: 'lab wide-code' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: '옥타브 수', min: 1, max: 3, step: 1, value: nOct, id: 'sf-o', oninput: v => { nOct = v; compute(); } }), UI.slider({ label: '대비 임계값 |DOG|', min: 0, max: 0.1, step: 0.005, value: thr, id: 'sf-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; compute(); } }),
+            h('span', { class: 'ctl' }, (() => { const c = h('input', { type: 'checkbox', id: 'sf-e' }); c.addEventListener('change', () => { edge = c.checked; compute(); }); return c; })(), h('label', { for: 'sf-e' }, '에지 응답 제거 (r=10, Lowe 2004)'))),
+            h('div', { style: { marginTop: '10px' } }, iv.el)),
+          h('div', { class: 'card' }, h('h3', {}, '선택한 키포인트의 26-이웃', h('small', {}, '그림 4-17 — 배지 <: 이웃이 c보다 작음, >: 큼')), h('div', { class: 'controls' }, UI.labeled('키포인트', kpSel)),
+            h('div', { class: 'row', style: { marginTop: '8px' } }, ...grids.map((g, i) => h('div', { class: 'col' }, h('span', { class: 'caption' }, ['(c) DOG(σ_{i−1}) 아래', '(b) DOG(σ_i) — X가 후보', '(a) DOG(σ_{i+1}) 위'][i]), g.el)))),
+          h('div', { class: 'card' }, h('h3', {}, 'SIFT의 스케일 공간', h('small', {}, '그림 4-16')), pyr),
+          h('div', { class: 'card' }, h('h3', {}, 'DOG ≈ 정규 라플라시안', h('small', {}, '식 (4.20)')), h('div', { class: 'controls' }, UI.slider({ label: 'k', min: 1.05, max: 2, step: 0.05, value: kk, id: 'sf-k', fmt: v => v.toFixed(2), oninput: v => { kk = v; dogPlot(); } })), dcv,
+            h('p', { class: 'caption' }, 'G(kσ) − G(σ) ≈ (k−1)σ²∇²G 이라서, DOG는 이미 σ²가 곱해진 정규 라플라시안(부호 반대, 상수배)입니다. k가 1에 가까울수록 두 곡선이 겹칩니다. Mikolajczyk(2002)의 실험에서 정규 라플라시안이 가장 안정적으로 극점을 만들었기 때문에, SIFT는 그것을 싸게 근사한 DOG를 씁니다.'),
+            h('p', { class: 'caption' }, '공개 소프트웨어: David Lowe, Rob Hess, Andrea Vedaldi(VLFeat), OpenCV.'))),
+        h('div', { class: 'stack' }, st.panel)));
+      compute(); dogPlot();
+    },
+  });
+
+  // ================= 4.4.4 SURF =================
+  APP.mod({
+    id: 'surf', ch: '4', num: '4.4.4', title: 'SURF 검출', src: '4강 p.39–41 · 식 (4.12)(4.22), 그림 4-18·4-19', star: true,
+    blurb: '헤시안 행렬식을 박스 마스크로 근사, 적분 영상으로 어떤 크기든 네 번 조회로 계산.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: 'SURF는 반복률을 잃지 않고 SIFT보다 빠르기를 목표로, <b>헤시안 행렬식</b>을 씁니다. 가우시안 2차 미분 d<sub>yy</sub>, d<sub>xx</sub>, d<sub>yx</sub>를 <b>상수 값 상자</b>로 근사한 9×9 마스크로 바꾸고(그림 4-18), 상자 합은 <b>적분 영상</b>에서 네 번 조회로 구합니다. 그래서 마스크 크기가 커져도 계산량이 같습니다. SIFT가 영상을 줄여 가며 같은 연산자를 쓰는 것과 반대로, SURF는 <b>영상은 그대로 두고 마스크를 키웁니다</b>.',
+        formulas: [
+          [R`$$C=\det(\mathbf{H})=d_{yy}(\sigma)d_{xx}(\sigma)-d_{yx}(\sigma)^2$$`, '식 (4.12)'],
+          [R`$$d_{yy}(\sigma)=\frac{\partial^2}{\partial y^2}\big(G(\sigma)\circledast f\big)=\Big(\frac{\partial^2}{\partial y^2}G(\sigma)\Big)\circledast f$$`, '식 (4.22)'],
+          [R`$$ii(y,x)=\sum_{y'\le y}\sum_{x'\le x}f(y',x'),\quad \sum_{\text{상자}}f=ii(D)-ii(B)-ii(C)+ii(A)$$`, '적분 영상'],
+        ],
+      });
+      // (1) masks
+      let L = 9;
+      const maskCell = which => (y, x) => { const v = CV.surfMask(L, which)[y][x]; return { t: L <= 15 ? (v || '') : '', bg: v > 0 ? 'var(--cell-bg)' : v < 0 ? 'var(--cell-on)' : 'color-mix(in srgb, var(--faint) 45%, var(--cell-bg))', color: v < 0 ? 'var(--cell-on-ink)' : '' }; };
+      const boxYY = h('div'), boxYX = h('div');
+      const gauss2 = which => { const s = 1.2, r = 4, M = CV.zeros(9, 9); for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) { const g = Math.exp(-(x * x + y * y) / (2 * s * s)); M[y + r][x + r] = which === 'yy' ? (y * y / s ** 4 - 1 / s ** 2) * g : (x * y / s ** 4) * g; } return M; };
+      const ivG1 = UI.FeatView({ width: 180 }), ivG2 = UI.FeatView({ width: 180 });
+      function masks() {
+        const cs = Math.max(7, Math.floor(200 / L));
+        for (const [box2, which] of [[boxYY, 'yy'], [boxYX, 'yx']]) { const g = UI.GridView({ rows: L, cols: L, cs, fs: cs > 14 ? 10 : 8, axes: false, cell: maskCell(which) }); g.draw(); box2.replaceChildren(g.el); }
+      }
+      // (2) integral image stepper
+      const SMALL = APP.parseGrid(`3 1 4 1 5 9
+2 6 5 3 5 8
+9 7 9 3 2 3
+8 4 6 2 6 4
+3 3 8 3 2 7
+9 5 0 2 8 8`);
+      let box = [1, 2, 3, 4], frame = null;
+      const CODE = [
+        'for(y=0 to M-1) for(x=0 to N-1)    // 적분 영상 만들기 (한 번만)',
+        '  ii(y,x) = f(y,x) + ii(y-1,x) + ii(y,x-1) − ii(y-1,x-1);',
+        '// 상자 (y0..y1, x0..x1)의 합 — 크기와 무관하게 네 번 조회',
+        'D = ii(y1, x1);',
+        'B = ii(y0-1, x1);   C = ii(y1, x0-1);',
+        'A = ii(y0-1, x0-1);',
+        '합 = D − B − C + A;',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '적분 영상과 상자 합', render: fr => { frame = fr; gS.draw(); gI.draw(); } });
+      const inBox = (y, x) => y >= box[0] && y <= box[2] && x >= box[1] && x <= box[3];
+      const gS = UI.GridView({ rows: 6, cols: 6, cs: 38, fs: 14, label: 'f', cell: (y, x) => ({ t: SMALL[y][x], cls: (frame && frame.phase === 2 && inBox(y, x) ? 'win' : '') + (frame && frame.phase === 1 && frame.y === y && frame.x === x ? ' cur' : '') }), onClick: (y, x, e) => { SMALL[y][x] = (SMALL[y][x] + (e.shiftKey ? 9 : 1)) % 10; build(); } });
+      let II = null;
+      const gI = UI.GridView({ rows: 6, cols: 6, cs: 44, fs: 13, label: 'ii', cell: (y, x) => {
+        if (!frame) return {};
+        const done = frame.phase === 2 || y * 6 + x <= frame.k;
+        const s = { t: done ? II[y + 1][x + 1] : '' };
+        if (frame.phase === 1 && frame.y === y && frame.x === x) s.cls = 'cur';
+        if (frame.phase === 1 && ((frame.y - 1 === y && frame.x === x) || (frame.y === y && frame.x - 1 === x) || (frame.y - 1 === y && frame.x - 1 === x))) s.cls = 'win';
+        if (frame.phase === 2 && frame.look) { const L2 = frame.look.find(([yy, xx]) => yy === y && xx === x); if (L2) { s.cls = 'cur'; s.badge = L2[2]; } }
+        return s;
+      } });
+      function build() {
+        II = CV.integral(SMALL);
+        const fr = [];
+        let k = 0;
+        for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++, k++) fr.push({ phase: 1, y, x, k, line: [1, 2], vars: { y, x, 'f(y,x)': SMALL[y][x], 'ii(y-1,x)': II[y][x + 1], 'ii(y,x-1)': II[y + 1][x], 'ii(y-1,x-1)': II[y][x], 'ii(y,x)': II[y + 1][x + 1] }, note: `ii(${y},${x}) = ${SMALL[y][x]} + ${II[y][x + 1]} + ${II[y + 1][x]} − ${II[y][x]} = <b>${II[y + 1][x + 1]}</b> — 왼쪽 위 직사각형 전체의 합` });
+        const [y0, x0, y1, x1] = box, D = II[y1 + 1][x1 + 1], B = II[y0][x1 + 1], C = II[y1 + 1][x0], A = II[y0][x0];
+        const look = [];
+        fr.push({ phase: 2, look: [[y1, x1, 'D']], line: 4, vars: { D }, note: `상자 (${y0}..${y1}, ${x0}..${x1}) — 오른쪽 아래 모서리 ii(${y1},${x1}) = ${D}는 상자와 그 위·왼쪽을 모두 포함합니다.` });
+        const lk = [[y1, x1, 'D']]; if (y0 > 0) lk.push([y0 - 1, x1, 'B']); if (x0 > 0) lk.push([y1, x0 - 1, 'C']);
+        fr.push({ phase: 2, look: lk.slice(), line: 5, vars: { D, B, C }, note: `위쪽 띠 B = ${B}, 왼쪽 띠 C = ${C}를 뺍니다${y0 === 0 || x0 === 0 ? ' (영상 밖이면 0)' : ''}.` });
+        if (y0 > 0 && x0 > 0) lk.push([y0 - 1, x0 - 1, 'A']);
+        fr.push({ phase: 2, look: lk.slice(), line: 6, vars: { D, B, C, A }, note: `왼쪽 위 A = ${A}는 두 번 빠졌으므로 한 번 더합니다.` });
+        let direct = 0; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) direct += SMALL[y][x];
+        fr.push({ phase: 2, look: lk.slice(), line: 7, vars: { D, B, C, A, '합': D - B - C + A, '직접 더한 값': direct }, note: `${D} − ${B} − ${C} + ${A} = <b>${D - B - C + A}</b> (직접 더하면 ${direct}). 상자가 9×9든 99×99든 조회는 네 번입니다.` });
+        st.load(fr, 'end');
+      }
+      const boxCtl = ['y0', 'x0', 'y1', 'x1'].map((nm, i) => UI.slider({ label: nm, min: 0, max: 5, step: 1, value: box[i], id: 'sb-' + nm, oninput: v => { box[i] = v; if (box[0] > box[2]) box[2] = box[0]; if (box[1] > box[3]) box[3] = box[1]; boxCtl.forEach((c, j) => c.set(box[j])); build(); } }));
+      // (3) detection
+      let nOct = 2, thr = 0.02;
+      const iv = UI.FeatView({ width: 560 }), oct = h('div'), timing = h('div');
+      function detect() {
+        const g = gray().map(r => r.map(v => v / 255)), Hh = g.length, Ww = g[0].length;
+        const [res, t] = ms(() => {
+          const ii = CV.integral(g), kps = [];
+          for (let o = 0; o < nOct; o++) {
+            const sizes = CV.surfSizes(o), maps = sizes.map(Ls => CV.surfDet(ii, Ls, Hh, Ww));
+            const mx = Math.max(...maps.flat(2));
+            for (let l = 1; l <= 2; l++) {
+              const b = (sizes[l + 1] - 1) / 2 + 1;
+              for (let y = b; y < Hh - b; y++) for (let x = b; x < Ww - b; x++) {
+                const c = maps[l][y][x]; if (c < thr * mx) continue;
+                let ok = true;
+                for (let d = -1; d <= 1 && ok; d++) for (let j = -1; j <= 1 && ok; j++) for (let a = -1; a <= 1; a++) if ((d || j || a) && maps[l + d][y + j][x + a] >= c) { ok = false; break; }
+                if (ok) kps.push({ y, x, L: sizes[l], s: 1.2 * sizes[l] / 9 });
+              }
+            }
+          }
+          return kps;
+        });
+        const [, tS] = ms(() => CV.siftKeypoints(CV.siftPyramid(gray(), 2), 0.03 * 255));
+        iv.draw(gray(), 'gray', { marks: res.map(k => ({ y: k.y, x: k.x, r: k.s * Math.SQRT2, color: '--orange', w: 1.4 })) });
+        iv.setCaption('SURF 키포인트 (원 반지름 √2·s, s = 1.2·L/9)'); iv.setInfo(`${res.length}개`);
+        timing.replaceChildren(h('dl', { class: 'kv' }, h('dt', {}, 'SURF (이 브라우저)'), h('dd', {}, `${t.toFixed(0)} ms`), h('dt', {}, 'SIFT 2옥타브'), h('dd', {}, `${tS.toFixed(0)} ms`)),
+          h('p', { class: 'caption' }, 'Bay(2008) 보고: 800×640 영상에서 SURF 70 ms, SIFT 400 ms, 해리스 라플라스 2100 ms. 여기 숫자는 최적화하지 않은 JavaScript라 절대값은 다르지만, 마스크가 커져도 계산량이 그대로인 SURF가 대체로 빠릅니다.'));
+      }
+      function octTable() {
+        oct.replaceChildren(UI.dataTable(['옥타브', '마스크 크기', '증가폭', '극점을 찾는 층'], [0, 1, 2].map(o => { const s = CV.surfSizes(o); return [o + 1, s.map(v => `${v}×${v}`).join(', '), s[1] - s[0], `${s[1]}, ${s[2]}`]; })),
+          h('p', { class: 'caption', html: '다음 옥타브는 이전 옥타브의 두 번째 마스크에서 시작해 증가폭을 두 배로 늘립니다. 극점은 그림 4-17처럼 위·아래 층과 26-이웃 비교로 찾으므로 가운데 두 층에서만 찾습니다. 근사 오차를 보정하려고 원 논문은 det ≈ D<sub>yy</sub>D<sub>xx</sub> − (0.9·D<sub>yx</sub>)²를 쓰며, 이 실습도 0.9를 곱했습니다.' }));
+      }
+      UI.onImage(detect);
+      const sizeSeg = UI.segmented([[9, '9×9'], [15, '15×15'], [21, '21×21'], [27, '27×27']], 9, v => { L = v; masks(); });
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('h3', {}, '가우시안 2차 미분과 박스 근사', h('small', {}, '그림 4-18 · 4-19 (흰 +, 검정 −, 회색 0)')), h('div', { class: 'controls' }, sizeSeg),
+            h('div', { class: 'row', style: { marginTop: '10px' } },
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '(a) d_yy'), ivG1.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '(b) d_yx'), ivG2.el),
+              h('div', { class: 'col' }, h('span', { class: 'caption' }, '(c) D_yy'), boxYY), h('div', { class: 'col' }, h('span', { class: 'caption' }, '(d) D_yx'), boxYX))),
+          h('div', { class: 'card' }, h('h3', {}, '적분 영상으로 상자 합 구하기'), h('div', { class: 'controls' }, ...boxCtl),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, 'f (클릭 +1) — 음영: 합을 구할 상자'), gS.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, '적분 영상 ii — 배지: 조회하는 A, B, C, D'), gI.el))),
+          h('div', { class: 'card' }, h('h3', {}, 'SURF의 스케일 공간', h('small', {}, '옥타브 구성')), oct),
+          h('div', { class: 'card' }, h('h3', {}, '실제 영상에서 검출'), h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: '옥타브 수', min: 1, max: 2, step: 1, value: nOct, id: 'sb-o', oninput: v => { nOct = v; detect(); } }), UI.slider({ label: '임계값 (×max)', min: 0.002, max: 0.2, step: 0.002, value: thr, id: 'sb-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; detect(); } })),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 420px' } }, iv.el), h('div', { class: 'col', style: { flex: '1 1 220px' } }, timing)))),
+        h('div', { class: 'stack' }, st.panel)));
+      ivG1.draw(gauss2('yy'), 'signed', { width: 180, grid: true }); ivG2.draw(gauss2('yx'), 'signed', { width: 180, grid: true });
+      masks(); build(); octTable(); detect();
+    },
+  });
+
+  // ================= 4.4.5 comparison =================
+  APP.mod({
+    id: 'detcmp', ch: '4', num: '4.4.5', title: '지역 특징 검출기 비교', src: '4강 p.42 · [Tuytelaars2007] 외 성능 분석 논문',
+    blurb: '어떤 검출기가 어떤 변환에 불변인가. 같은 영상을 회전·축소하며 반복률을 직접 재 보기.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '어떤 지역 특징을 쓸지는 응용에 따라 다르므로, 교재는 <b>손수 성능 실험을 하고 판단하라</b>고 권합니다([Tuytelaars2007, 7.1절]의 지침 참조). 아래에서 같은 영상을 회전·축소한 뒤 각 검출기의 <b>반복률</b>(원래 점이 변환된 위치 근처에서 다시 검출되는 비율)과 시간을 재 볼 수 있습니다.',
+        formulas: [],
+      });
+      const rows = [
+        ['모라벡', '제곱차 합 4방향 최소', '이동', '✘ (4방향)', '✘', '아주 빠름'],
+        ['해리스', '2차 모멘트 A의 det − k·trace²', '이동', '✔', '✘', '빠름'],
+        ['헤시안 det / LOG', '2차 미분 H', '이동', '✔', '✘ (σ 고정)', '빠름'],
+        ['슈산', 'USAN 넓이', '이동', '✔', '✘', '빠름'],
+        ['해리스 라플라스', '해리스 + 정규 라플라시안', '이동', '✔', '✔', '느림 (2100 ms)'],
+        ['SIFT', 'DOG 26-이웃 극점', '이동', '✔', '✔', '보통 (400 ms)'],
+        ['SURF', '박스 근사 det(H) + 적분 영상', '이동', '✔', '✔', '빠름 (70 ms)'],
+      ];
+      let deg = 30, scl = 0.7;
+      const out = h('div'), cvs = h('canvas');
+      function harrisPts(g) { const C = CV.harris(g.map(r => r.map(v => v / 255)), { G: CV.gaussKernel2D(1.5), border: 'replicate' }).C; return CV.localMax(C, 0.05 * Math.max(...C.flat()), 8).map(([y, x]) => ({ y, x, s: 1.5 })); }
+      function siftPts(g) { return CV.siftKeypoints(CV.siftPyramid(g, 2), 0.02 * 255, 10).map(k => ({ y: k.Y, x: k.X, s: k.s })); }
+      function surfPts(g) {
+        const f = g.map(r => r.map(v => v / 255)), H = f.length, W = f[0].length, ii = CV.integral(f), out2 = [];
+        const sizes = CV.surfSizes(0), maps = sizes.map(L => CV.surfDet(ii, L, H, W)), mx = Math.max(...maps.flat(2));
+        for (let l = 1; l <= 2; l++) { const b = (sizes[l + 1] - 1) / 2 + 1; for (let y = b; y < H - b; y++) for (let x = b; x < W - b; x++) { const c = maps[l][y][x]; if (c < 0.01 * mx) continue; let ok = true; for (let d = -1; d <= 1 && ok; d++) for (let j = -1; j <= 1 && ok; j++) for (let a = -1; a <= 1; a++) if ((d || j || a) && maps[l + d][y + j][x + a] >= c) { ok = false; break; } if (ok) out2.push({ y, x, s: 1.2 * sizes[l] / 9 }); } }
+        return out2;
+      }
+      const DET = [['해리스 (단일 스케일)', harrisPts, '--neg'], ['SIFT', siftPts, '--orange'], ['SURF', surfPts, '--ok']];
+      function run() {
+        const g = gray(), Wp = CV.warp(g, deg, scl), hb = Wp.img.length, wb = Wp.img[0].length, res = [];
+        for (const [nm, fn, colr] of DET) {
+          const [A, ta] = ms(() => fn(g)), B = fn(Wp.img);
+          const mp = A.map(p => ({ ...p, m: Wp.map(p.y, p.x) })).filter(p => p.m[0] >= 4 && p.m[1] >= 4 && p.m[0] < hb - 4 && p.m[1] < wb - 4);
+          const tol = 1.5 + 0.5 / scl;
+          const hit = mp.filter(p => B.some(q => (q.y - p.m[0]) ** 2 + (q.x - p.m[1]) ** 2 <= tol * tol));
+          res.push({ nm, colr, nA: A.length, nB: B.length, n: mp.length, hit: hit.length, rate: mp.length ? hit.length / mp.length : 0, ta });
+        }
+        UI.plot(cvs, { w: 460, h: 190, x: [-0.5, 2.5], y: [0, 100], xticks: [0, 1, 2], xfmt: v => res[v] ? res[v].nm.split(' ')[0] : '', series: res.map((r, i) => ({ type: 'bar', data: [[i, r.rate * 100]], color: r.colr, bw: 70 })), yfmt: v => v + '%' });
+        out.replaceChildren(UI.dataTable(['검출기', '원래 영상 점', '변환 영상 점', '반복', '반복률', '시간'], res.map(r => [r.nm, r.nA, r.nB, `${r.hit}/${r.n}`, (r.rate * 100).toFixed(0) + '%', r.ta.toFixed(0) + ' ms'])));
+      }
+      UI.onImage(run);
+      root.append(
+        h('div', { class: 'card' }, h('h3', {}, '불변성 한눈에 보기'), UI.dataTable(['검출기', '특징 가능성', '이동', '회전', '스케일', '속도 (교재·Bay2008)'], rows.map(r => [h('b', {}, r[0]), r[1], '✔', r[3], r[4], r[5]])),
+          h('p', { class: 'caption' }, '이 장의 검출기는 모두 위치·스케일까지만 정합니다. 방향과 특징 벡터(기술자)는 6장에서 다룹니다. 어파인(비스듬히 본) 변환까지 불변인 검출기는 [Mikolajczyk2005b]에 비교되어 있습니다.')),
+        h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', {}, '직접 해 보는 반복률 실험'),
+          h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: '회전', min: 0, max: 90, step: 5, value: deg, id: 'dc-r', fmt: v => v + '°', oninput: v => { deg = v; run(); } }), UI.slider({ label: '스케일', min: 0.5, max: 1, step: 0.05, value: scl, id: 'dc-s', fmt: v => v.toFixed(2), oninput: v => { scl = v; run(); } })),
+          h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 420px' } }, cvs), h('div', { class: 'col', style: { flex: '1 1 380px' } }, out)),
+          h('p', { class: 'caption' }, '간단히 하려고 위치만 비교했습니다(허용 오차 약 1.5~2.5화소). 논문의 반복률은 검출 영역의 겹침 비율까지 봅니다. 영상과 변환에 따라 순위가 바뀌므로 교재 말대로 “손수 실험하고 판단”해야 합니다.')),
+        h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', {}, '참고 논문'),
+          h('ul', { class: 'caption', style: { margin: 0, paddingLeft: '18px' } },
+            h('li', {}, '[Tuytelaars2007] T. Tuytelaars, K. Mikolajczyk, “Local invariant feature detectors: a survey,” Foundations and Trends in Computer Graphics and Vision 3(3), 177–280 — 튜토리얼'),
+            h('li', {}, '[Schmid2000] C. Schmid et al., “Evaluation of interest point detectors,” IJCV 37(2), 151–172'),
+            h('li', {}, '[Mikolajczyk2005b] K. Mikolajczyk et al., “A comparison of affine region detectors,” IJCV 65(1-2), 43–72'),
+            h('li', {}, '[Miksik2012] O. Miksik, K. Mikolajczyk, “Evaluation of local detectors and descriptors for fast feature matching,” ICPR, 2681–2684'),
+            h('li', {}, '[Aanes2012] H. Aanæs et al., “Interesting interest points,” IJCV 97, 18–35'))));
+      run();
     },
   });
 })();

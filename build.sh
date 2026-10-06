@@ -8,7 +8,7 @@ mkdir -p dist
   echo '<style>'; cat src/style.css; echo '</style>'
   cat src/shell_body.html
   echo '<script>'
-  for f in lib ui app m2a m2b m3a m3b; do cat "src/$f.js"; echo; done
+  for f in lib ui app m2a m2b m3a m3b m4a m4b; do cat "src/$f.js"; echo; done
   echo 'APP.start();'
   echo '</script>'
 } > dist/cv-lab.html
