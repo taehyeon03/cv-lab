@@ -32,8 +32,8 @@ const APP = (() => {
       slidebar(),
       h('p', { class: 'lead', html: '각 페이지는 <b>① 강의자료의 수식</b>, <b>② 값을 직접 바꿀 수 있는 시각화</b>, <b>③ 교재 의사 코드와 한 줄씩 맞춰 보는 단계 실행기</b>로 되어 있습니다. 단계 실행기는 Python Tutor처럼 ◀ ▶ 버튼(또는 키보드 ← →)으로 한 단계씩 움직이며, 지금 실행 중인 코드 줄이 노란색으로 표시되고 변수 값과 호출 스택이 함께 바뀝니다. 격자의 숫자는 대부분 클릭해서 바꿀 수 있습니다.' }),
     );
-    const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출' };
-    for (const ch of ['2', '3', '4']) {
+    const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출', practice: '직접 풀어 보기' };
+    for (const ch of ['2', '3', '4', 'practice']) {
       root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, CH[ch]));
       root.append(h('div', { class: 'intro-grid' }, mods.filter(m => m.ch === ch).map(m => h('a', { href: '#' + m.id }, h('div', { class: 'card' }, h('span', { class: 'n' }, m.num + (m.star ? '  · 단계 실행' : '')), h('b', {}, m.title), h('span', { class: 'caption' }, m.blurb))))));
     }
@@ -134,7 +134,7 @@ const APP = (() => {
 
   function nav() {
     const rail = document.getElementById('rail'), msel = document.getElementById('msel');
-    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['4', '4강 · 지역 특징 검출']];
+    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['4', '4강 · 지역 특징 검출'], ['practice', '문제 풀기']];
     rail.append(h('a', { href: '#', 'data-id': '' }, h('span', { class: 'n' }, '—'), h('span', {}, '개요')));
     msel.append(h('option', { value: '' }, '개요'));
     for (const [ch, label] of groups) {
