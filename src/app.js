@@ -86,6 +86,45 @@ const APP = (() => {
       ['식 (2.4)에서 min(·, 1.0)은 왜 쓰나요?', 'ĥ<sub>m</sub>/ĥ<sub>i</sub>로 나누면 영상 전체에 흔한 색은 깎이고 얼굴에 특징적인 색은 커집니다. 그런데 ĥ<sub>i</sub>가 작으면 비율이 몇십 배까지 커지므로, 1에서 잘라 ① 신뢰도를 0~1로 두고 ② 드문 색 몇 칸이 결과를 독차지하지 않게 하고 ③ 분모가 작은 칸의 불안정한 값을 막습니다. 예: 0.30/0.05 = 6.0 → 1.0, 0.10/0.40 = 0.25 → 0.25.'],
     ],
   };
+  // "수업에서 강조한 점" — from the 2026-09-22 lecture recording notes (voice-wiki); only points the notes mark as confirmed
+  const LECTURE = '2026-09-22 강의 녹음 정리';
+  const NOTES = {
+    conv: { items: [
+      '강의 예제: 마스크 <b>2 0 1</b>로 컨볼루션하려면 <b>1 0 2</b>로 뒤집어 놓고 상관처럼 밀면 편하다.',
+      '수식에서는 f(i+x)면 상관, f(i−x)(인덱스에 마이너스)면 컨볼루션이다. 논문에 이런 식이 자주 나오므로 <b>식만 보고 둘을 구분</b>할 수 있어야 한다.',
+    ], action: ['강의 예제 마스크 2 0 1 넣기', () => { const u = document.querySelector('input[aria-label="윈도우 u"]'); if (u) { u.value = '2 0 1'; u.dispatchEvent(new Event('change')); } }] },
+    coloredge: { items: [
+      '방법은 두 가지로 소개됐다: RGB 채널마다 에지를 구해 <b>OR로 합치기</b>(한 채널이라도 에지면 에지), 채널별 변화량을 함께 쓰는 <b>디 젠조</b> 방법.',
+      '명암 차이가 없어도 <b>색 차이</b>로 생기는 경계를 잡을 수 있다는 것이 핵심.',
+      '<b>컬러 에지는 개념만 알면 되고 시험 문제로는 내지 않겠다</b>고 했다 (전체 시험 범위는 미확정).',
+    ] },
+    spta: { items: [
+      '실제 에지는 여러 화소 두께로 나오므로, <b>연결을 끊지 않으면서</b> 폭을 줄이는 세선화가 필요하다.',
+      '조건식 기호: <b>+ = OR, 곱(·) = AND, ′ = NOT</b>. 네 조건이 모두 참일 때만 중심 화소를 지운다.',
+      '지우면 연결이 끊기는 화소(예: 끝점)는 지우지 않는다 — 지운 뒤에도 주변이 이어져 있고 선 폭만 줄어드는지가 핵심 조건.',
+    ] },
+    track: { items: [
+      '에지 토막 = 끝점에서 통과점들을 지나 다른 끝점이나 분기점까지 이어진 화소열. 폐곡선은 끝점이 없을 수 있다.',
+      '체인 코드 = <b>시작 좌표 + 0~7 방향 번호의 열</b>. 좌표를 전부 저장하지 않고 모양을 표현한다.',
+      '이웃이 1개면 끝점, 2개면 통과점이 기본이지만, 붙어 있는 이웃 때문에 <b>개수만 세면 분기점을 잘못 고를 수 있어</b> 한 바퀴 돌며 에지↔비에지 <b>전환 횟수</b>를 본다.',
+      '이웃을 봐야 하므로 영상 가장자리 한 칸은 빼고 순회하고, 찾은 이웃 좌표·방향을 큐에 넣었다 꺼내며 추적한다.',
+    ] },
+    approx: { items: [
+      '에지 검출이 끝이 아니다: <b>자율주행 차선</b>처럼 에지를 직선(선분)으로 바꿔야 중앙 위치·진행 방향을 구할 수 있다.',
+      '임계값 h가 <b>작을수록 더 잘게 나뉘어 선분이 많아진다</b> — 아래 슬라이더로 확인해 보세요.',
+    ] },
+    hough: { items: [
+      '허프 변환은 <b>에지를 먼저 연결하지 않아도</b>, 끊어진 점들이 한 직선 위에 정렬돼 있으면 직선을 찾는다.',
+      '예: 아스팔트 위 <b>끊어진 흰 차선</b>도 하나의 직선으로 인식. 환경이 제한된 대회 트랙에서는 이런 전통적 직선 검출이 여전히 쓸모 있다.',
+    ] },
+  };
+  function insertNotes(el, n) {
+    const box = h('div', { class: 'card lecture-note' }, h('h3', {}, '수업에서 강조한 점', h('small', {}, LECTURE)),
+      h('ul', {}, n.items.map(t => h('li', { html: t }))),
+      n.action ? h('button', { class: 'btn', type: 'button', onclick: n.action[1] }, n.action[0]) : null);
+    const after = el.querySelector('.formula-card') || el.querySelector('.lead');
+    if (after) after.after(box); else el.prepend(box);
+  }
   function insertFaq(el, items) {
     const box = h('div', { class: 'card faq' }, h('h3', {}, '헷갈리기 쉬운 점', h('small', {}, '질문을 눌러 펼치기')),
       items.map(([q, a]) => h('details', {}, h('summary', {}, q), h('div', { class: 'a', html: a }))));
@@ -122,6 +161,7 @@ const APP = (() => {
       mounted.set(key, el);
       if (m) m.mount(el, m); else intro(el);
       if (m && FAQ[m.id]) insertFaq(el, FAQ[m.id]);
+      if (m && NOTES[m.id]) insertNotes(el, NOTES[m.id]);
       UI.typeset(el);
     }
     mounted.get(key).hidden = false;
