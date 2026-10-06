@@ -18,7 +18,6 @@
 0 0 0 0 0 0 0 0 0 0 0 0`;
   const PTS = { a: [7, 7], b: [5, 3], c: [2, 8] };
   const ptName = (y, x) => Object.keys(PTS).find(k => PTS[k][0] === y && PTS[k][1] === x);
-  const gray = () => UI.currentImage().gray;
   const kindOf = (l1, l2, big) => (l1 < big * 0.05 ? ['평탄한 곳', 'pill'] : l2 < l1 * 0.2 ? ['에지', 'pill hot'] : ['코너(특징점)', 'pill ok']);
 
   // ================= 4.1 basics =================
@@ -39,27 +38,32 @@
         ['계산 효율', 'efficiency', '실시간 응용에 쓸 수 있을 만큼 빠르다.'],
       ];
       // perception experiment: click anywhere, see how brightness changes when the window is shifted in 8 directions
-      let pt = null;
-      const iv = UI.FeatView({ caption: '영상을 클릭해 보세요 — 9×9 창을 8방향으로 한 화소씩 옮겨 봅니다', onClick: (y, x) => { pt = [y, x]; draw(); } });
+      // Fig 4-4: the three points marked on the deer photo
+      const DEER = { a: [83, 81], b: [135, 102], c: [23, 30] };
+      let pt = DEER.a.slice();
+      const iv = UI.FeatView({ caption: '영상을 클릭해 보세요 — 9×9 창을 8방향으로 한 화소씩 옮겨 봅니다', onClick: (y, x) => { pt = [y, x]; abSeg.set(null); draw(); } });
       const sBox = h('div');
       function draw() {
-        const g = gray();
-        iv.draw(g, 'gray', { marks: pt ? [{ kind: 'rect', y: pt[0] - 4, x: pt[1] - 4, hh: 9, ww: 9 }] : [] });
+        const g = pk.gray();
+        const fig = pk.key === 'deer' ? Object.entries(DEER).map(([n, [y, x]]) => ({ kind: 'cross', y, x, color: '--bad', size: 5 })) : [];
+        iv.draw(g, 'gray', { marks: [...fig, ...(pt ? [{ kind: 'rect', y: pt[0] - 4, x: pt[1] - 4, hh: 9, ww: 9 }] : [])] });
         if (!pt) { sBox.replaceChildren(h('p', { class: 'caption' }, '아직 고른 점이 없습니다.')); return; }
         const S = CV.moravecS(g, pt[0], pt[1], 4), mx = Math.max(1, ...S.flat());
         const vals = [S[1][2], S[1][0], S[2][1], S[0][1], S[0][0], S[0][2], S[2][0], S[2][2]], lo = Math.min(...vals), hi = Math.max(...vals);
         const cls = hi < 2000 ? ['모든 방향으로 변화가 적다 → 평탄한 곳 (나쁜 특징)', 'pill'] : lo < hi * 0.15 ? ['어느 방향은 변화가 적고 어느 방향은 크다 → 에지 (애매한 특징)', 'pill hot'] : ['모든 방향으로 변화가 크다 → 코너 (좋은 특징)', 'pill ok'];
-        const gv = UI.GridView({ rows: 3, cols: 3, cs: 62, fs: 11, rowLabels: ['-1', '0', '1'], colLabels: ['-1', '0', '1'], cell: (y, x) => ({ t: Math.round(S[y][x]), ...APP.grayCell(S[y][x], mx) }) });
+        const gv = UI.GridView({ rows: 3, cols: 3, cs: 62, fs: 11, rowLabels: ['-1', '0', '1'], colLabels: ['-1', '0', '1'], cell: (y, x) => { const t = S[y][x] / mx, v = Math.round(20 + t * 225); return { t: Math.round(S[y][x]), bg: `rgb(${v},${v},${v})`, color: v > 140 ? '#1b211d' : '#fff' }; } });
         gv.draw();
-        sBox.replaceChildren(h('div', { class: 'row' }, h('div', { class: 'col' }, h('span', { class: 'caption' }, `S(v,u) 맵 — 점 (${pt[0]}, ${pt[1]}), 밝을수록 큰 변화`), gv.el),
+        sBox.replaceChildren(h('div', { class: 'row' }, h('div', { class: 'col' }, h('span', { class: 'caption' }, `S(v,u) 맵 — 점 (${pt[0]}, ${pt[1]})${ptN() ? ' = 그림 4-4의 ' + ptN() : ''}, 밝을수록 큰 값`), gv.el),
           h('div', { class: 'col', style: { maxWidth: '300px' } }, h('span', { class: cls[1] }, cls[0]), h('p', { class: 'caption' }, `가장 작은 변화 ${Math.round(lo)}, 가장 큰 변화 ${Math.round(hi)}. 사람에게 짝을 찾기 쉬운 곳(여러 방향으로 밝기가 바뀌는 곳)이 컴퓨터에게도 쉽습니다. 이 “좋은 정도”를 숫자로 만든 것이 다음 절의 특징 가능성 C입니다.`))));
       }
-      UI.onImage(draw);
+      const ptN = () => (pk.key === 'deer' ? Object.keys(DEER).find(k => DEER[k][0] === pt[0] && DEER[k][1] === pt[1]) : null);
+      const pk = UI.figPicker('deer', () => draw());
+      const abSeg = UI.segmented([['a', 'a (뿔·코너)'], ['b', 'b (다리·에지)'], ['c', 'c (풀밭·평탄)']], 'a', v => { pk.set('deer'); pt = DEER[v].slice(); draw(); }, '그림 4-4의 점');
       root.append(
         h('div', { class: 'lab' },
           h('div', { class: 'stack' },
-            h('div', { class: 'card' }, h('h3', {}, '인지 실험: 어떤 점이 짝 찾기 쉬운가', h('small', {}, '4.1.3')), h('div', { class: 'controls' }, UI.imagePicker()), h('div', { style: { marginTop: '10px' } }, iv.el)),
-            h('div', { class: 'card' }, h('h3', {}, '창을 옮겼을 때의 변화량'), sBox)),
+            h('div', { class: 'card' }, h('h3', {}, '인지 실험: 어떤 점이 짝 찾기 쉬운가', h('small', {}, '4.1.3 · 그림 4-4')), h('div', { class: 'controls' }, pk.el, abSeg), h('div', { style: { marginTop: '10px' } }, iv.el)),
+            h('div', { class: 'card' }, h('h3', {}, '창을 옮겼을 때의 변화량', h('small', {}, '9×9 마스크로 측정 (그림 4-4)')), sBox)),
           h('div', { class: 'stack' },
             h('div', { class: 'card' }, h('h3', {}, '지역 특징이 갖춰야 할 성질', h('small', {}, '4.1.2')), UI.dataTable(['성질', '영문', '뜻'], props.map(p => [h('b', {}, p[0]), p[1], p[2]])),
               h('p', { class: 'note warn', style: { marginTop: '10px' } }, '이 성질들은 서로 길항(trade-off) 관계입니다. 예: 분별력을 높이려 영역을 넓히면 지역성이 떨어지고, 양을 늘리면 계산 효율이 떨어집니다. 그래서 응용에 맞는 특징을 골라야 합니다.')),
@@ -236,15 +240,15 @@
       let sig = 1.5, thr = 0.02, useNms = false;
       const iv = UI.FeatView({ caption: '' });
       function real() {
-        const g = gray().map(r => r.map(v => v / 255)), Hm = CV.harris(g, { G: CV.gaussKernel2D(sig), k, border: 'replicate' });
+        const g = pk.gray().map(r => r.map(v => v / 255)), Hm = CV.harris(g, { G: CV.gaussKernel2D(sig), k, border: 'replicate' });
         const mx = Math.max(...Hm.C.flat()), T = thr * mx;
         let pts = [];
         if (useNms) pts = CV.localMax(Hm.C, T, 8).map(([y, x]) => [y, x]);
         else Hm.C.forEach((r, y) => r.forEach((v, x) => { if (v > T) pts.push([y, x]); }));
-        iv.draw(gray(), 'gray', { marks: pts.map(([y, x]) => ({ kind: 'dot', y, x, size: useNms ? 3.5 : 1.6, color: '--neg' })) });
+        iv.draw(pk.gray(), 'gray', { marks: pts.map(([y, x]) => ({ kind: 'dot', y, x, size: useNms ? 3.5 : 1.6, color: '--neg' })) });
         iv.setCaption(useNms ? `C > ${thr}·max 이면서 8-이웃보다 큰 점 (비최대 억제)` : `C > ${thr}·max 인 모든 화소 — 코너 주위에 덩어리로 몰려 나옴 (그림 4-6)`); iv.setInfo(`${pts.length}개`);
       }
-      UI.onImage(real);
+      const pk = UI.figPicker('deer', () => real());
       const ptSeg = UI.segmented([['a', '점 a'], ['b', '점 b'], ['c', '점 c']], 'a', v => { pt = PTS[v].slice(); rebuild(); });
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
@@ -254,7 +258,7 @@
               h('div', { class: 'col' }, h('span', { class: 'caption' }, '선택한 맵 (그림 4-5) — 주황 칸이 지금 더하는 항'), gM.el))),
           h('div', { class: 'card' }, h('h3', {}, '세 점의 특징 가능성', h('small', {}, '표 4-1')), h('div', { class: 'row' }, tbl, h('div', { class: 'col' }, h('span', { class: 'caption' }, '고유값 평면: 초록 = C > 0.02 (코너), 빨강 = C < 0 (에지)'), lam))),
           h('div', { class: 'card' }, h('h3', {}, '실제 영상에 적용', h('small', {}, '그림 4-6')),
-            h('div', { class: 'controls' }, UI.imagePicker(), UI.slider({ label: 'G의 σ', min: 0.7, max: 3, step: 0.1, value: sig, id: 'hr-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; real(); } }), UI.slider({ label: '임계값 (×max)', min: 0.002, max: 0.2, step: 0.002, value: thr, id: 'hr-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; real(); } }),
+            h('div', { class: 'controls' }, pk.el, UI.slider({ label: 'G의 σ', min: 0.7, max: 3, step: 0.1, value: sig, id: 'hr-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; real(); } }), UI.slider({ label: '임계값 (×max)', min: 0.002, max: 0.2, step: 0.002, value: thr, id: 'hr-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; real(); } }),
               UI.segmented([[false, '임계값만'], [true, '+ 비최대 억제']], false, v => { useNms = v; real(); })),
             h('div', { style: { marginTop: '10px' } }, iv.el),
             h('p', { class: 'caption' }, '“코너”라는 이름은 정확하지 않습니다 — 실제로는 무늬가 복잡한 곳 어디서나 C가 커지므로 특징점 또는 관심점(interest point)이라 부르는 편이 낫습니다.'))),
@@ -280,7 +284,7 @@
       const ivS = UI.FeatView({ caption: '', width: 420, onClick: (y, x) => { pt = [y, x]; draw(); } }), ivM = UI.FeatView({ caption: '', width: 420, onClick: (y, x) => { pt = [y, x]; draw(); } });
       const info = h('div');
       function draw() {
-        const g = gray(), Hs = CV.hessian(g, sig), map = which === 'det' ? Hs.det : Hs.lap;
+        const g = pk.gray(), Hs = CV.hessian(g, sig), map = which === 'det' ? Hs.det : Hs.lap;
         const resp = which === 'det' ? map : map.map(r => r.map(Math.abs)), mx = Math.max(...resp.flat());
         const pts = CV.localMax(resp, thr * mx, 8);
         const marks = pts.map(([y, x]) => ({ y, x, r: sig * Math.SQRT2, color: '--orange', w: 1.5 }));
@@ -293,8 +297,8 @@
           h('dl', { class: 'kv' }, h('dt', {}, 'det(H)'), h('dd', {}, Hs.det[y][x].toFixed(2)), h('dt', {}, 'trace(H)'), h('dd', {}, Hs.lap[y][x].toFixed(2)), h('dt', {}, '고유값'), h('dd', {}, `${l1.toFixed(2)}, ${l2.toFixed(2)}`)),
           h('p', { class: 'caption' }, l1 * l2 > 0 ? '두 고유값의 부호가 같음 → 두 방향 모두 볼록/오목 (블롭 중심, det > 0)' : '두 고유값의 부호가 다르거나 하나가 0에 가까움 → 에지나 안장점 (det ≤ 0)'));
       }
-      UI.onImage(draw);
-      root.append(h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.imagePicker(), UI.segmented([['det', 'det(H) (식 4.12)'], ['lap', 'LOG (식 4.13)']], which, v => { which = v; draw(); }), UI.slider({ label: 'σ', min: 1, max: 6, step: 0.5, value: sig, id: 'hs-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; draw(); } }), UI.slider({ label: '임계값 (×max)', min: 0.01, max: 0.6, step: 0.01, value: thr, id: 'hs-t', fmt: v => v.toFixed(2), oninput: v => { thr = v; draw(); } })),
+      const pk = UI.figPicker('deer', () => draw());
+      root.append(h('div', { class: 'card' }, h('div', { class: 'controls' }, pk.el, UI.segmented([['det', 'det(H) (식 4.12)'], ['lap', 'LOG (식 4.13)']], which, v => { which = v; draw(); }), UI.slider({ label: 'σ', min: 1, max: 6, step: 0.5, value: sig, id: 'hs-s', fmt: v => v.toFixed(1), oninput: v => { sig = v; draw(); } }), UI.slider({ label: '임계값 (×max)', min: 0.01, max: 0.6, step: 0.01, value: thr, id: 'hs-t', fmt: v => v.toFixed(2), oninput: v => { thr = v; draw(); } })),
         h('div', { class: 'row', style: { marginTop: '12px' } }, h('div', { class: 'col', style: { flex: '1 1 380px' } }, ivS.el), h('div', { class: 'col', style: { flex: '1 1 380px' } }, ivM.el), h('div', { class: 'col', style: { flex: '1 1 220px' } }, info))),
         h('p', { class: 'note', style: { marginTop: '16px' } }, 'σ를 키우면 작은 무늬는 사라지고 큰 블롭에서만 반응합니다. σ가 곧 “얼마나 큰 구조를 찾는가”를 정하는 스케일이며, 4.4절에서 이 σ를 자동으로 고르는 방법을 배웁니다. 행렬식은 SURF(4.4.4)가, LOG는 SIFT의 DOG(4.4.3)가 근사해 씁니다.'));
       draw();
@@ -450,7 +454,7 @@
         return CV.localMax(C, 0.08 * Math.max(...C.flat()), 8).filter(([y, x]) => y >= 3 && x >= 3 && y < hh - 3 && x < ww - 3);
       }
       function inv() {
-        const g = gray(), W = CV.warp(g, deg, scl), A = detect(g), B = detect(W.img);
+        const g = pk.gray(), W = CV.warp(g, deg, scl), A = detect(g), B = detect(W.img);
         const hb = W.img.length, wb = W.img[0].length;
         const mapped = A.map(([y, x]) => W.map(y, x)).filter(([y, x]) => y >= 3 && x >= 3 && y < hb - 3 && x < wb - 3);
         const hit = mapped.filter(([y, x]) => B.some(([b, a]) => (b - y) ** 2 + (a - x) ** 2 <= 2.25));
@@ -459,13 +463,13 @@
         const pct = mapped.length ? Math.round(hit.length / mapped.length * 100) : 0;
         rep.replaceChildren(h('span', { class: pct >= 60 ? 'pill ok' : pct >= 35 ? 'pill hot' : 'pill bad' }, `반복률 ${pct}%`), h('span', { class: 'caption' }, `  원래 점을 변환한 위치(파랑 +) ${mapped.length}개 중 ${hit.length}개 근처(1.5화소)에서 다시 검출(주황 원)`));
       }
-      UI.onImage(inv);
+      const pk = UI.figPicker('deer', () => inv());
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.slider({ label: '임계값 T', min: 0, max: 0.15, step: 0.005, value: T, id: 'lc-t', fmt: v => v.toFixed(3), oninput: v => { T = v; rebuild(); } }), UI.segmented([[4, '4-이웃 (교재)'], [8, '8-이웃']], 4, v => { nb = v; rebuild(); })),
             h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '그림 4-9(a) — 주황 칸: 지금 화소, 음영: 비교하는 이웃, ★: 특징점'), gM.el, fBox))),
           h('div', { class: 'card' }, h('h3', {}, '이동·회전에는 불변, 스케일에는?', h('small', {}, '그림 4-10 · 4-11')),
-            h('div', { class: 'controls' }, UI.imagePicker(), UI.labeled('측정', UI.select(Object.entries(MEAS), meas, v => { meas = v; inv(); }, 'lc-m')),
+            h('div', { class: 'controls' }, pk.el, UI.labeled('측정', UI.select(Object.entries(MEAS), meas, v => { meas = v; inv(); }, 'lc-m')),
               UI.slider({ label: '회전', min: 0, max: 90, step: 5, value: 0, id: 'lc-r', fmt: v => v + '°', oninput: v => { deg = v; inv(); } }), UI.slider({ label: '스케일', min: 0.4, max: 1, step: 0.05, value: 1, id: 'lc-s', fmt: v => v.toFixed(2), oninput: v => { scl = v; inv(); } })),
             h('div', { style: { margin: '8px 0' } }, rep),
             h('div', { class: 'row' }, h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivA.el), h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivB.el)),

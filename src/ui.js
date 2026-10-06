@@ -410,6 +410,22 @@ const UI = (() => {
       return fromCanvas(c);
     }],
   };
+  // photos from the Chapter 4 slides (src/fig4.js)
+  function fromFig(F) {
+    const bin = atob(F.b64), gray = [];
+    for (let y = 0; y < F.h; y++) { const r = []; for (let x = 0; x < F.w; x++) r.push(bin.charCodeAt(y * F.w + x)); gray.push(r); }
+    return { gray, rgb: gray.map(r => r.map(v => [v, v, v])), w: F.w, h: F.h };
+  }
+  if (typeof FIG4 !== 'undefined') for (const k of Object.keys(FIG4)) SCENES[k] = [FIG4[k].title, () => fromFig(FIG4[k])];
+  // page-local picker (does not change the shared image used by chapters 2–3)
+  function figPicker(def, onchange) {
+    const cache = {}, get = k => (cache[k] || (cache[k] = SCENES[k][1]()));
+    let key = def;
+    const s = h('select', { 'aria-label': '실습 영상' }, Object.entries(SCENES).map(([k, [t]]) => h('option', { value: k }, t)));
+    s.value = key;
+    s.addEventListener('change', () => { key = s.value; onchange(); });
+    return { el: h('span', { class: 'ctl' }, h('span', {}, '실습 영상'), s), gray: () => get(key).gray, set: k => { key = k; s.value = k; }, get key() { return key; } };
+  }
   const APP_IMG = { cur: null, key: 'shapes', subs: new Set() };
   function currentImage() { if (!APP_IMG.cur) APP_IMG.cur = SCENES[APP_IMG.key][1](); return APP_IMG.cur; }
   function onImage(fn) { APP_IMG.subs.add(fn); return () => APP_IMG.subs.delete(fn); }
@@ -452,5 +468,5 @@ const UI = (() => {
   const grayBg = (v, max = 255) => { const t = Math.max(0, Math.min(1, v / max)); const g = Math.round(255 - t * 200); return `rgb(${g},${g},${g})`; };
   const signedBg = (v, amax) => { const t = Math.min(1, Math.abs(v) / (amax || 1)) * 0.55; return v >= 0 ? `color-mix(in srgb, var(--pos) ${t * 100}%, var(--cell-bg))` : `color-mix(in srgb, var(--neg) ${t * 100}%, var(--cell-bg))`; };
 
-  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, FeatView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, matrixEl, dataTable, formula, grayBg, signedBg };
+  return { h, esc, tok, col, fmt, typeset, flushMath, slider, segmented, labeled, select, Stepper, GridView, ImageView, FeatView, plot, nice, rng, SCENES, currentImage, onImage, setImage, imagePicker, figPicker, matrixEl, dataTable, formula, grayBg, signedBg };
 })();
