@@ -267,6 +267,101 @@
     },
   });
 
+  // ================= 4.2.2+ eigenvalues / eigenvectors of A =================
+  APP.mod({
+    id: 'eigen', ch: '4', num: '4.2.2+', title: '고윳값·고유벡터와 특징 가능성', src: '4강 p.15–17 · 식 (4.7)–(4.9), 표 4-1 — 직접 계산 연습', star: true,
+    blurb: '2×2 행렬의 고윳값·고유벡터를 손으로 구하고, 그것으로 C를 재기 → 고윳값 없이 det·trace로 재기.',
+    mount(root, m) {
+      APP.scaffold(root, m, {
+        lead: '해리스의 2차 모멘트 행렬 A는 “창을 방향 u로 옮겼을 때 밝기가 얼마나 바뀌는가” S = uAuᵀ를 담고 있습니다. <b>고유벡터</b>는 A를 곱해도 방향이 바뀌지 않는 방향(Av = λv)이고, 그 방향으로 옮겼을 때의 변화량이 <b>고윳값</b> λ입니다. 그래서 λ1은 가장 크게 변하는 방향의 변화량, λ2는 가장 작게 변하는 방향의 변화량입니다. 아래에서 ① 간단한 예제로 고윳값·고유벡터를 구하고 ② 그 값으로 C를 잰 다음 ③ 고윳값 없이 det·trace로 같은 C를 얻는 과정을 따라가고, 마지막에 직접 풀어 보세요.',
+        formulas: [
+          [R`$$\mathbf{A}\mathbf{v}=\lambda\mathbf{v}\ \Leftrightarrow\ \det(\mathbf{A}-\lambda\mathbf{I})=0\ \Leftrightarrow\ \lambda^2-(p+q)\lambda+(pq-r^2)=0$$`, '특성 방정식 (A = [[p r][r q]])'],
+          [R`$$\lambda_{1,2}=\frac{p+q}{2}\pm\sqrt{\Big(\frac{p-q}{2}\Big)^2+r^2},\qquad \mathbf{v}=(1,\ \tfrac{\lambda-p}{r})$$`, '2×2 대칭 행렬의 고윳값·고유벡터'],
+          [R`$$\lambda_1\lambda_2=\det(\mathbf{A})=pq-r^2,\qquad \lambda_1+\lambda_2=\operatorname{trace}(\mathbf{A})=p+q$$`, '그래서 식 (4.8) = 식 (4.9)'],
+        ],
+      });
+      const PRE = {
+        ex: ['간단한 예제', 2, 2, 1], ex2: ['정수 예제 2', 4, 7, -2],
+        a: ['표 4-1 점 a (코너)', 0.522, 0.527, -0.199], b: ['표 4-1 점 b (에지)', 0.075, 0.801, -0.075], c: ['표 4-1 점 c (평탄)', 0, 0, 0],
+      };
+      let [, p, q, r] = PRE.ex, k = 0.04, th = 20, frame = null;
+      const nf = v => (Math.abs(v) < 5e-7 ? '0' : Number.isInteger(v) ? String(v) : (+v.toFixed(4)).toString());
+      const inP = h('input', { type: 'number', step: 'any', value: p, style: { width: '80px' }, 'aria-label': 'p' }), inQ = h('input', { type: 'number', step: 'any', value: q, style: { width: '80px' }, 'aria-label': 'q' }), inR = h('input', { type: 'number', step: 'any', value: r, style: { width: '80px' }, 'aria-label': 'r' });
+      [inP, inQ, inR].forEach(el => el.addEventListener('change', () => { p = +inP.value || 0; q = +inQ.value || 0; r = +inR.value || 0; preSeg.set(null); rebuild(); }));
+      const preSeg = UI.segmented(Object.entries(PRE).map(([kk, v]) => [kk, v[0]]), 'ex', v => { [, p, q, r] = PRE[v]; inP.value = p; inQ.value = q; inR.value = r; rebuild(); });
+      const eig = () => { const [l1, l2] = CV.eig2(p, r, q); const vec = l => (Math.abs(r) > 1e-12 ? [1, (l - p) / r] : Math.abs(l - p) < 1e-12 && Math.abs(p - q) > 1e-12 ? [1, 0] : Math.abs(p - q) < 1e-12 ? null : [0, 1]); return { l1, l2, v1: vec(l1), v2: vec(l2) }; };
+      // components are (y, x) like the book's u = (v, u)
+      const CODE = [
+        'A = [[p, r], [r, q]];                       // 2차 모멘트 행렬',
+        'Av = λv  ⇔  (A − λI)v = 0  ⇔  det(A − λI) = 0;',
+        '(p−λ)(q−λ) − r² = 0  →  λ² − (p+q)λ + (pq−r²) = 0;',
+        'λ1, λ2 = ((p+q) ± √((p+q)² − 4(pq−r²))) / 2;',
+        'v1: (p−λ1)·y + r·x = 0 의 해,  v2: (p−λ2)·y + r·x = 0 의 해;',
+        '검산: A·v1 = λ1·v1,  v1 ⟂ v2;',
+        'C = λ1·λ2 − k·(λ1+λ2)²;                     // 식 (4.8)',
+        'det = p·q − r²;  trace = p + q;              // 고윳값 없이',
+        'C = det − k·trace²;                          // 식 (4.9) — 같은 값',
+        '판정: 둘 다 크면 코너, 하나만 크면 에지, 둘 다 작으면 평탄;',
+      ];
+      const st = UI.Stepper({ code: CODE, title: '고윳값 → C,  그리고 det·trace → C', render: fr => { frame = fr; draw(); } });
+      const cvs = h('canvas', { width: 340, height: 340, style: { width: '100%', maxWidth: '340px', border: '1px solid var(--rule)', borderRadius: '8px', background: 'var(--cell-bg)' } });
+      const readout = h('div'), cmp = h('div');
+      const thSl = UI.slider({ label: '방향 u의 각도', min: 0, max: 179, step: 1, value: th, id: 'eg-th', fmt: v => v + '°', oninput: v => { th = v; draw(); } });
+      const snapBtn = which => h('button', { class: 'btn', type: 'button', onclick: () => { const e = eig(), v = which === 1 ? e.v1 : e.v2; if (!v) return; let a = Math.round(Math.atan2(v[0], v[1]) * 180 / Math.PI); a = ((a % 180) + 180) % 180; th = a; thSl.set(a); draw(); } }, which === 1 ? 'u를 v1 방향으로' : 'u를 v2 방향으로');
+      function rebuild() {
+        const { l1, l2, v1, v2 } = eig(), det = p * q - r * r, tr = p + q, Ce = l1 * l2 - k * (l1 + l2) ** 2, Cd = det - k * tr * tr, disc = tr * tr - 4 * det;
+        const kind = l1 < 1e-9 ? '평탄 (둘 다 0)' : l2 < 0.2 * l1 ? '에지 (하나만 큼)' : '코너 (둘 다 큼)';
+        const fr = [
+          { line: 1, vars: { p, q, r }, note: `A = [[${nf(p)}, ${nf(r)}], [${nf(r)}, ${nf(q)}]] — 대각선 p = Σd<sub>y</sub>², q = Σd<sub>x</sub>², 비대각 r = Σd<sub>y</sub>d<sub>x</sub>.` },
+          { line: 2, vars: { p, q, r }, note: 'v가 0이 아닌데 (A − λI)v = 0이 되려면 A − λI가 역행렬을 갖지 않아야 합니다 → 행렬식 = 0. 이 식을 풀면 λ가 나옵니다.' },
+          { line: 3, vars: { 'p+q': tr, 'pq−r²': det }, note: `(${nf(p)}−λ)(${nf(q)}−λ) − (${nf(r)})² = 0 → <b>λ² − ${nf(tr)}λ + ${nf(det)} = 0</b> (특성 방정식). 계수가 바로 trace와 det입니다.` },
+          { line: 4, vars: { '판별식': disc, λ1: l1, λ2: l2 }, note: `λ = (${nf(tr)} ± √${nf(disc)}) / 2 → <b>λ1 = ${nf(l1)}, λ2 = ${nf(l2)}</b>. 대칭 행렬이라 판별식 (p−q)² + 4r² ≥ 0, 고윳값은 항상 실수입니다.` },
+          { line: 5, vars: { v1: v1 ? `(1, ${nf(v1[1])})` : '모든 방향', v2: v2 ? `(1, ${nf(v2[1])})` : '모든 방향' }, eig: true, note: v1 ? `v = (v<sub>y</sub>, v<sub>x</sub>)의 첫 성분을 1로 두고 (A − λI)v = 0의 첫 줄 (p−λ)·1 + r·v<sub>x</sub> = 0을 풀면 v<sub>x</sub> = (λ−p)/r: <b>v1 = (1, ${nf(v1[1])})</b>, <b>v2 = (1, ${nf(v2[1])})</b>. 그림의 주황(v1)·파랑(v2) 화살표.` : 'A가 단위행렬의 상수배라 모든 방향이 고유벡터입니다 (변화량이 방향과 무관).' },
+          { line: 6, vars: { 'v1·v2': v1 && v2 ? +(v1[0] * v2[0] + v1[1] * v2[1]).toFixed(6) : '-' }, eig: true, note: v1 ? `A·v1 = (${nf(p * v1[0] + r * v1[1])}, ${nf(r * v1[0] + q * v1[1])}) = ${nf(l1)}×(${nf(v1[0])}, ${nf(v1[1])}) ✔. 두 고유벡터의 내적 = 0 → 서로 수직. “u를 v1 방향으로” 버튼을 눌러 Au가 u와 겹치는지 보세요.` : '검산할 고유벡터 방향이 정해지지 않습니다.' },
+          { line: 7, vars: { 'λ1λ2': l1 * l2, '(λ1+λ2)²': (l1 + l2) ** 2, k, C: Ce }, eig: true, note: `C = ${nf(l1)}×${nf(l2)} − ${k}×(${nf(l1)}+${nf(l2)})² = <b>${nf(Ce)}</b>` },
+          { line: 8, vars: { det, trace: tr }, eig: true, note: `det = ${nf(p)}×${nf(q)} − (${nf(r)})² = <b>${nf(det)}</b> (= λ1λ2 = ${nf(l1 * l2)}),  trace = ${nf(p)} + ${nf(q)} = <b>${nf(tr)}</b> (= λ1+λ2 = ${nf(l1 + l2)})` },
+          { line: 9, vars: { det, trace: tr, k, C: Cd }, eig: true, note: `C = ${nf(det)} − ${k}×${nf(tr)}² = <b>${nf(Cd)}</b> — 식 (4.8)과 같은 값. 제곱근(고윳값) 계산이 필요 없어 모든 화소에서 빠르게 계산할 수 있습니다.` },
+          { line: 10, vars: { λ1: l1, λ2: l2, C: Cd }, eig: true, note: `<b>${kind}</b>. C > 0이 크면 코너, C < 0이면 에지(하나만 큰 경우 −k(λ1+λ2)² 항이 이김), C ≈ 0이면 평탄.` },
+        ];
+        st.load(fr, frame ? Math.min(st.i, fr.length - 1) : 0);
+        cmp.replaceChildren(UI.dataTable(['', '식 (4.8) 고윳값', '식 (4.9) det·trace'], [['곱 항', `λ1λ2 = ${nf(l1 * l2)}`, `det = ${nf(det)}`], ['합 항', `λ1+λ2 = ${nf(l1 + l2)}`, `trace = ${nf(tr)}`], ['C', nf(Ce), nf(Cd)]]));
+      }
+      function draw() {
+        const { l1, l2, v1, v2 } = eig(), c = cvs.getContext('2d'), W = 340, cx = 170, cy = 170, R = 130;
+        const dpr = Math.min(2, window.devicePixelRatio || 1); if (cvs.width !== W * dpr) { cvs.width = cvs.height = W * dpr; }
+        c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, W);
+        const sc = R / Math.max(Math.abs(l1), Math.abs(l2), 1e-9), P = (dy, dx, len) => [cx + dx * len * sc, cy + dy * len * sc];
+        c.strokeStyle = UI.tok('--rule'); c.lineWidth = 1; c.beginPath(); c.moveTo(10, cy); c.lineTo(W - 10, cy); c.moveTo(cx, 10); c.lineTo(cx, W - 10); c.stroke();
+        c.fillStyle = UI.tok('--muted'); c.font = '11px sans-serif'; c.fillText('x (u)', W - 38, cy - 6); c.fillText('y (v)', cx + 6, W - 12);
+        // S(θ) = uAuᵀ for unit u, drawn as radius
+        c.strokeStyle = UI.tok('--faint'); c.lineWidth = 2; c.beginPath();
+        for (let a = 0; a <= 360; a += 2) { const t = a * Math.PI / 180, dy = Math.sin(t), dx = Math.cos(t), S = p * dy * dy + 2 * r * dy * dx + q * dx * dx, [X, Y] = P(dy, dx, S); a ? c.lineTo(X, Y) : c.moveTo(X, Y); }
+        c.stroke();
+        const arrow = (dy, dx, len, colr, w = 3, label) => { const [X, Y] = P(dy, dx, len); c.strokeStyle = c.fillStyle = UI.col(colr); c.lineWidth = w; c.beginPath(); c.moveTo(cx, cy); c.lineTo(X, Y); c.stroke(); const ang = Math.atan2(Y - cy, X - cx); c.beginPath(); c.moveTo(X, Y); c.lineTo(X - 9 * Math.cos(ang - 0.4), Y - 9 * Math.sin(ang - 0.4)); c.lineTo(X - 9 * Math.cos(ang + 0.4), Y - 9 * Math.sin(ang + 0.4)); c.fill(); if (label) { c.font = '12px sans-serif'; c.fillText(label, X + 5, Y - 5); } };
+        const t = th * Math.PI / 180, uy = Math.sin(t), ux = Math.cos(t), Ay = p * uy + r * ux, Ax = r * uy + q * ux, S = uy * Ay + ux * Ax;
+        arrow(uy, ux, Math.max(Math.abs(l1), 1e-9) * 0.55, '--ink', 2, 'u');
+        if (Math.hypot(Ay, Ax) > 1e-12) arrow(Ay, Ax, 1, '--ok', 2.5, 'Au');
+        const showEig = frame && frame.eig;   // eigenvectors on top so they stay visible when Au lines up with them
+        if (showEig && v1 && l1 > 1e-12) { const n1 = Math.hypot(...v1), n2 = Math.hypot(...v2); arrow(v1[0] / n1, v1[1] / n1, l1, '--orange', 4, 'λ1·v1'); if (l2 > 1e-12) arrow(v2[0] / n2, v2[1] / n2, l2, '--neg', 4, 'λ2·v2'); }
+        const cross = Math.abs(uy * Ax - ux * Ay) / (Math.hypot(Ay, Ax) || 1);
+        readout.replaceChildren(h('dl', { class: 'kv' }, h('dt', {}, 'u = (v, u)'), h('dd', {}, `(${uy.toFixed(3)}, ${ux.toFixed(3)})`), h('dt', {}, 'Au'), h('dd', {}, `(${Ay.toFixed(3)}, ${Ax.toFixed(3)})`), h('dt', {}, 'S = uAuᵀ'), h('dd', {}, S.toFixed(4))),
+          h('p', { class: cross < 0.01 && Math.hypot(Ay, Ax) > 1e-12 ? 'pill ok' : 'pill' }, cross < 0.01 && Math.hypot(Ay, Ax) > 1e-12 ? `Au ∥ u → u가 고유벡터, S = λ = ${S.toFixed(4)}` : 'Au와 u의 방향이 다름 → 고유벡터 아님'),
+          h('p', { class: 'caption' }, `회색 곡선: 방향별 변화량 S(θ) = uAuᵀ (원점에서의 거리). 가장 먼 방향이 v1(최대 λ1 = ${nf(l1)}), 가장 가까운 방향이 v2(최소 λ2 = ${nf(l2)})입니다.`));
+      }
+      root.append(h('div', { class: 'lab' },
+        h('div', { class: 'stack' },
+          h('div', { class: 'card' }, h('h3', {}, '① 행렬 고르기'), h('div', { class: 'controls' }, preSeg),
+            h('div', { class: 'controls', style: { marginTop: '8px' } }, UI.labeled('p', inP), UI.labeled('q', inQ), UI.labeled('r', inR), UI.slider({ label: 'k', min: 0.02, max: 0.15, step: 0.01, value: k, id: 'eg-k', fmt: v => v.toFixed(2), oninput: v => { k = v; rebuild(); } })),
+            h('p', { class: 'caption' }, '“간단한 예제” A = [[2, 1], [1, 2]]: λ² − 4λ + 3 = 0 → λ = 3, 1, v1 = (1, 1), v2 = (1, −1). 먼저 이것을 손으로 풀어 보고 단계 실행기로 확인하세요.')),
+          h('div', { class: 'card' }, h('h3', {}, '② 방향 u를 돌려 보기', h('small', {}, 'Av = λv의 뜻')), h('div', { class: 'controls' }, thSl, snapBtn(1), snapBtn(2)),
+            h('div', { class: 'row', style: { marginTop: '10px' } }, cvs, h('div', { class: 'col', style: { flex: '1 1 220px' } }, readout))),
+          h('div', { class: 'card' }, h('h3', {}, '③ 두 방식 비교', h('small', {}, '식 (4.8) vs 식 (4.9)')), cmp),
+          h('div', { class: 'card' }, h('h3', {}, '④ 직접 풀어 보기', h('small', {}, '채점 · 단계별 풀이')), h('p', { class: 'caption' }, '고윳값·고유벡터 → 고윳값으로 C → det·trace로 C 순서로 풀어 보세요. 보통 난이도의 det·trace 문제는 화소 미분값에서 A를 만드는 것부터 시작합니다. “문제 풀기” 페이지에도 같은 유형이 있습니다.'), QUIZ.panel(['eigen', 'harrisEig', 'harrisDet'], 'eigen', 'eig4'))),
+        h('div', { class: 'stack' }, st.panel)));
+      rebuild();
+    },
+  });
+
   // ================= 4.2.3 Hessian =================
   APP.mod({
     id: 'hessian', ch: '4', num: '4.2.3', title: '2차 미분: 헤시안과 LOG', src: '4강 p.20 · 식 (4.11)–(4.13)',
