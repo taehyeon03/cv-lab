@@ -659,7 +659,7 @@ G G G G G G G G`;
     blurb: '범람 채움 재귀 호출을 호출 스택과 함께 한 줄씩. 4-연결성 vs 8-연결성, 열 단위 버전.',
     mount(root, m) {
       APP.scaffold(root, m, {
-        lead: '이진 영상에서 서로 이어진 1 화소 묶음에 같은 번호를 붙입니다. <b>범람 채움</b>은 번호 없는 화소(-1)를 만나면 번호를 붙이고 이웃으로 재귀 호출합니다. 오른쪽 <b>호출 스택</b>이 쌓였다가 풀리는 모습을 보세요 — 영상이 크면 이 스택이 넘칩니다(스택 오버플로). 입력 격자는 칸을 드래그해 그릴 수 있습니다.',
+        lead: '이진 영상에서 서로 이어진 1 화소 묶음에 같은 번호를 붙입니다. <b>범람 채움</b>은 번호 없는 화소(-1)를 만나면 번호를 붙이고 이웃으로 재귀 호출합니다. 재귀 방식에서는 오른쪽 <b>호출 스택</b>을, <b>메모리 절약 · 큐</b> 방식에서는 격자 아래의 대기줄을 보세요. 큐는 가로 구간의 대표 좌표를 저장하며, 위·아래 이웃을 따로 검사하는 과정을 한 단계씩 보여 줍니다. 입력 격자는 드래그해 바꿀 수 있습니다.',
         formulas: [],
       });
       let b = APP.parseGrid(CC_IMG), conn = 4, algo = 'rec', frame = null, st = null;
@@ -675,6 +675,13 @@ G G G G G G G G`;
           if (!frame) return {};
           const v = frame.l[y][x], cur = frame.cur && frame.cur[0] === y && frame.cur[1] === x;
           const s = v === -1 ? { t: '-1', cls: 'on' } : v === 0 ? { t: '0', color: 'var(--faint)' } : { t: v, bg: labelColor(v), color: '#111', bold: true };
+          if (algo === 'eff') {
+            const queued = frame.queue && frame.queue.some(p => p[0] === y && p[1] === x);
+            const ev = frame.event, active = ev && ev.point[0] === y && ev.point[1] === x;
+            const inSpan = frame.span && frame.span.y === y && x >= frame.span.left && x <= frame.span.right;
+            s.cls = (s.cls || '') + (queued ? ' cc-waiting' : '') + (inSpan ? ' cc-span' : '') +
+              (active && ev.kind === 'push' ? ' cc-new-cell' : active && ev.kind === 'pop' ? ' cc-pop-cell' : '');
+          }
           if (cur) s.cls = (s.cls || '') + ' cur';
           return s;
         },
@@ -733,35 +740,83 @@ G G G G G G G G`;
       function framesEff() {
         const l = b.map(r => r.map(v => (v ? -1 : 0))), fr = [];
         for (let y = 0; y < M; y++) for (let x = 0; x < N; x++) if (y === 0 || x === 0 || y === M - 1 || x === N - 1) l[y][x] = 0;
-        let label = 1, Q = [], maxQ = 0;
-        const snap = (line, note, cur, vars = {}) => fr.push({ line, l: CV.clone(l), cur, note, vars: { label, ...vars, '큐 길이': Q.length }, stack: Q.map(([y, x]) => `(${y}, ${x})`) });
-        snap([1, 2, 3], 'b를 l로 복사하고 경계를 0으로, label=1.');
+        let label = 1, Q = [], maxQ = 0, span = null;
+        const snap = (line, note, cur, vars = {}, event = null, before = Q) => {
+          maxQ = Math.max(maxQ, Q.length);
+          fr.push({ line, l: CV.clone(l), cur, note, vars: { label, ...vars, '큐 길이': Q.length },
+            queue: Q.map(p => [...p]), before: before.map(p => [...p]), event,
+            span: span && { ...span }, maxQ });
+        };
+        const push = (p, line, note, vars = {}) => {
+          const before = Q.map(p => [...p]); Q.push(p);
+          snap(line, note, p, vars, { kind: 'push', point: [...p] }, before);
+        };
+        snap([1, 2, 3], '미처리 화소는 -1. 큐에는 앞으로 확인할 가로 구간의 대표 좌표가 들어갑니다.');
         for (let j = 1; j < M - 1; j++) for (let i = 1; i < N - 1; i++) {
-          snap(6, `주사: l(${j},${i}) = ${l[j][i]}` + (l[j][i] === -1 ? ' → <b>새 연결요소</b>' : ''), [j, i], { j, i });
+          span = null;
+          snap(6, `주사: l(${j},${i}) = ${l[j][i]}` + (l[j][i] === -1 ? ' → 새 연결요소 발견' : ' → 건너뜀'), [j, i], { j, i });
           if (l[j][i] !== -1) continue;
-          Q = []; snap(14, 'Q = ∅', [j, i]);
-          Q.push([j, i]); snap(15, `push(Q, (${j},${i}))`, [j, i]);
+          Q = []; snap(14, '새 연결요소를 위한 빈 큐를 만듭니다.', [j, i]);
+          push([j, i], 15, `시작 좌표 (${j},${i})를 큐의 뒤에 추가합니다.`);
           while (Q.length) {
-            const [y, x] = Q.shift();
-            snap(17, `pop(Q) → (${y},${x}), l = ${l[y][x]}` + (l[y][x] === -1 ? '' : ' → 이미 처리됨, 건너뜀'), [y, x], { y, x });
-            if (l[y][x] !== -1) continue;
+            span = null;
+            const before = Q.map(p => [...p]), [y, x] = Q.shift();
+            snap(17, `큐의 맨 앞 (${y},${x})를 꺼냅니다. 나머지는 순서를 유지합니다.`, [y, x], { y, x }, { kind: 'pop', point: [y, x] }, before);
+            if (l[y][x] !== -1) { snap(18, '이미 번호가 붙은 좌표이므로 건너뜁니다. 큐에 기다리는 동안 다른 구간에서 처리될 수 있습니다.', [y, x]); continue; }
             let left = x, right = x;
             while (l[y][left - 1] === -1) left--;
             while (l[y][right + 1] === -1) right++;
-            snap([19, 20, 21], `같은 행에서 -1이 이어진 구간: left=${left}, right=${right}`, [y, x], { y, x, left, right });
+            span = { y, left, right };
+            snap([19, 20, 21], `꺼낸 좌표에서 가로로 확장: ${y}행의 ${left}~${right}열을 한 번에 탐색합니다.`, [y, x], { y, x, left, right });
             for (let c = left; c <= right; c++) {
               l[y][c] = label;
-              const pu = [];
-              if (l[y - 1][c] === -1 && (c === left || l[y - 1][c - 1] !== -1)) { Q.push([y - 1, c]); pu.push(`(${y - 1},${c})`); }
-              if (l[y + 1][c] === -1 && (c === left || l[y + 1][c - 1] !== -1)) { Q.push([y + 1, c]); pu.push(`(${y + 1},${c})`); }
-              maxQ = Math.max(maxQ, Q.length);
-              snap([23, 24, 25], `l(${y},${c}) = ${label}` + (pu.length ? ` · 위/아래 행의 새 구간 시작점 ${pu.join(', ')}을 큐에 넣음` : ''), [y, c], { y, c, left, right });
+              snap(23, `(${y},${c})에 번호 ${label}을 붙입니다. 이제 위·아래 이웃을 각각 확인합니다.`, [y, c], { y, c, left, right });
+              for (const [dy, line, name] of [[-1, 24, '위'], [1, 25, '아래']]) {
+                const ny = y + dy, untreated = l[ny][c] === -1;
+                const first = c === left || l[ny][c - 1] !== -1;
+                const vars = { y, c, left, right, '이웃 행': ny };
+                if (untreated && first) {
+                  push([ny, c], line, `${name} (${ny},${c}): 미처리이고 ${c === left ? '현재 탐색 구간의 첫 열' : '왼쪽 이웃이 미처리가 아니므로 새 가로 구간'}입니다. 대표 좌표 하나를 큐 뒤에 추가합니다.`, vars);
+                } else {
+                  snap(line, `${name} (${ny},${c}): ${!untreated ? '배경이거나 이미 번호가 있어 추가하지 않습니다.' : '왼쪽 이웃도 미처리입니다. 같은 가로 구간이므로 또 추가하지 않습니다.'}`, [ny, c], vars, { kind: 'skip', point: [ny, c] });
+                }
+              }
             }
           }
-          snap(8, `연결요소 ${label} 완성 → label++`, [j, i]); label++;
+          span = null;
+          snap(8, `큐가 비었습니다. 연결요소 ${label} 처리가 끝났으므로 다음 번호로 넘어갑니다.`); label++;
         }
-        fr.push({ ...fr[fr.length - 1], line: [], note: `끝. 연결요소 ${label - 1}개, 큐 최대 길이 <b>${maxQ}</b> — 재귀 버전의 스택 깊이와 비교해 보세요.` });
+        snap([], `끝. 연결요소 ${label - 1}개, 큐 최대 길이 ${maxQ}. 화소마다 재귀 호출하는 대신 가로 구간의 대표 좌표를 보관했습니다.`);
         return fr;
+      }
+      const queuePanel = h('div', { class: 'card cc-queue', hidden: true });
+      const coord = p => `(${p[0]}, ${p[1]})`;
+      function drawQueue() {
+        queuePanel.hidden = algo !== 'eff';
+        if (algo !== 'eff' || !frame || !frame.queue) return;
+        const event = frame.event;
+        const lane = (title, points, before) => h('div', {}, h('span', { class: 'caption' }, title),
+          h('div', { class: 'cc-lane' }, h('span', { class: 'caption' }, '앞 · 꺼내기'),
+            ...(points.length ? points.map((p, i) => h('span', { class: 'cc-token' +
+              (event && event.kind === 'push' && !before && i === points.length - 1 ? ' cc-added' : '') +
+              (event && event.kind === 'pop' && before && i === 0 ? ' cc-removed' : '') }, coord(p))) : [h('span', { class: 'caption' }, '비어 있음')]),
+            h('span', { class: 'caption' }, '뒤 · 추가')));
+        const jump = dir => {
+          st.stop();
+          for (let i = st.i + dir; i >= 0 && i < st.frames.length; i += dir) {
+            const e = st.frames[i].event;
+            if (e && (e.kind === 'push' || e.kind === 'pop')) { st.go(i); return; }
+          }
+        };
+        queuePanel.replaceChildren(
+          h('h3', {}, '큐 Q · 다음에 처리할 구간의 대기줄'),
+          h('p', {}, '먼저 넣은 좌표를 먼저 꺼냅니다. 좌표는 (행, 열)입니다. 꺼낸 좌표에서 가로로 끝까지 탐색하므로, 이어진 이웃 구간에서는 대표 좌표 하나만 추가합니다.'),
+          h('div', { class: 'controls' }, h('button', { class: 'btn', onclick: () => jump(-1) }, '이전 큐 변화'), h('button', { class: 'btn', onclick: () => jump(1) }, '다음 큐 변화')),
+          h('p', { class: 'cc-event' }, event ? `${event.kind === 'push' ? '추가 → 뒤에 넣기' : event.kind === 'pop' ? '꺼내기 ← 맨 앞에서' : '추가 안 함'} ${coord(event.point)}` : '큐는 그대로 · 현재 화소를 확인하는 단계'),
+          lane('이번 단계 전', frame.before, true), lane('이번 단계 후', frame.queue, false),
+          h('p', { class: 'caption' }, `현재 ${frame.queue.length}개 대기 · 지금까지 최대 ${frame.maxQ}개`),
+          h('p', { class: 'note' }, frame.note.replace(/<[^>]*>/g, '')),
+          h('p', { class: 'caption' }, '번호 영상: 파란 테두리 = 큐에서 대기 · 초록 테두리 = 방금 추가 · 빨간 테두리 = 방금 꺼냄 · 주황 = 지금 검사 · 가로 밑줄 = 현재 탐색 구간'));
       }
       const lab = h('div', { class: 'lab wide-code' });
       function rebuild() {
@@ -769,7 +824,7 @@ G G G G G G G G`;
         gIn.draw();
         const code = algo === 'rec' ? recCode(conn) : EFF_CODE;
         const prev = st;
-        st = UI.Stepper({ code, title: algo === 'rec' ? `알고리즘 2-5 범람 채움 (${conn}-연결성)` : '알고리즘 2-6 범람 채움 (메모리 절약)', render: fr => { frame = fr; gL.draw(); } });
+        st = UI.Stepper({ code, title: algo === 'rec' ? `알고리즘 2-5 범람 채움 (${conn}-연결성)` : '알고리즘 2-6 범람 채움 (메모리 절약)', render: fr => { frame = fr; gL.draw(); drawQueue(); } });
         if (prev) prev.stop();
         lab.replaceChildren(
           h('div', { class: 'stack' },
@@ -777,13 +832,13 @@ G G G G G G G G`;
               h('div', { class: 'row', style: { marginTop: '10px' } },
                 h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 b (드래그해서 그리기)'), gIn.el),
                 h('div', { class: 'col' }, h('span', { class: 'caption' }, '번호 영상 l — 검정: -1(미처리), 색: 번호, 주황 테두리: 지금 보는 화소'), gL.el))),
-            st.root,
+            queuePanel, st.root,
             h('div', { class: 'note' }, '같은 입력이라도 4-연결성에서는 대각선으로만 닿은 화소가 다른 번호를 받습니다(그림 2-17 b와 c). 연결성을 바꿔 번호가 어떻게 합쳐지는지 확인해 보세요.')),
           h('div', { class: 'stack' }, st.panel));
-        st.load(algo === 'rec' ? framesRec() : framesEff(), 'end');
+        st.load(algo === 'rec' ? framesRec() : framesEff(), algo === 'eff' ? 0 : 'end');
       }
       const connSeg = UI.segmented([[4, '4-연결'], [8, '8-연결']], 4, v => { conn = v; rebuild(); }, '연결성');
-      const algoSeg = UI.segmented([['rec', '재귀 (2-5)'], ['eff', '열 단위 (2-6)']], 'rec', v => { algo = v; rebuild(); }, '방식');
+      const algoSeg = UI.segmented([['rec', '재귀 (2-5)'], ['eff', '메모리 절약 · 큐 (2-6)']], 'rec', v => { algo = v; rebuild(); }, '방식');
       root.append(lab);
       rebuild();
     },

@@ -268,3 +268,15 @@ table.data td.cur { background: var(--hl); }
 .otsu-review details { border-top: 1px solid var(--rule); padding: 16px 0 4px; margin-top: 16px; }
 .otsu-review summary { cursor: pointer; font-weight: 600; line-height: 1.7; }
 @media(max-width:600px) { .otsu-review .card { padding: 18px; } .otsu-review h2 { font-size: 23px; } .otsu-review .otsu-math { font-size: 14px; } }
+
+/* FIFO queue snapshots for scanline flood fill. */
+.cc-queue p { line-height: 1.8; }
+.cc-lane { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:14px 0; min-height:64px; }
+.cc-token { border:2px solid #2875b8; border-radius:8px; padding:8px 10px; font-family:var(--mono); background:var(--surface-2); }
+.cc-added { border-color:#178248; background:#e1f5e8; color:#14552e; }
+.cc-removed { border-color:#bf4237; background:#ffebe8; color:#85281f; }
+.cc-event { font-weight:700; }
+.cc-waiting { outline:3px solid #2875b8; outline-offset:-4px; }
+.cc-span { border-bottom:4px solid #8763bb !important; }
+.cc-new-cell { outline:3px solid #178248; outline-offset:-4px; }
+.cc-pop-cell { outline:3px solid #bf4237; outline-offset:-4px; }
