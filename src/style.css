@@ -280,3 +280,20 @@ table.data td.cur { background: var(--hl); }
 .cc-span { border-bottom:4px solid #8763bb !important; }
 .cc-new-cell { outline:3px solid #178248; outline-offset:-4px; }
 .cc-pop-cell { outline:3px solid #bf4237; outline-offset:-4px; }
+
+/* Shared chapter Q&A: intuition first, mathematics on its own line. */
+.faq { padding: 22px 26px; margin: 0 0 24px; }
+.faq > h3 { margin-bottom: 16px; font-size: 18px; }
+.faq details { padding: 16px 0; }
+.faq summary { font-size: 16px; line-height: 1.7; padding-right: 12px; }
+.faq details[open] summary { color: var(--orange); }
+.faq .a { font-size: 15px; line-height: 1.9; margin: 20px 0 8px; max-width: 780px; }
+.faq .a p { margin: 16px 0; }
+.faq .a .faq-key { font-size: 17px; font-weight: 600; color: var(--ink); margin-top: 0; }
+.faq .a b { color: var(--ink); }
+.faq .a ul { padding-left: 24px; margin: 18px 0; }
+.faq .a li { margin: 9px 0; }
+.faq-math { overflow-x: auto; padding: 12px 16px; margin: 20px 0; border-radius: 8px; background: var(--surface-2); }
+.faq .a .faq-note { border-left: 3px solid var(--rule); padding-left: 16px; color: var(--muted); }
+.faq summary:focus-visible { outline: 2px solid var(--orange); outline-offset: 4px; border-radius: 4px; }
+@media(max-width:600px) { .faq { padding:18px; } .faq .a { font-size:14px; } .faq .a .faq-key { font-size:16px; } .faq-math { padding:8px; font-size:14px; } }
