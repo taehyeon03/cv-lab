@@ -4872,6 +4872,36 @@ G G G G G G G G`;
         const sc = Math.max(...dog.map(Math.abs)), sc2 = Math.max(...lap.map(Math.abs));
         UI.plot(dcv, { w: 440, h: 200, x: [-5, 5], y: [-0.6, 1.05], series: [{ data: xs.map((x, i) => [x, lap[i] / sc2]), color: '--bad', width: 3 }, { data: xs.map((x, i) => [x, dog[i] / sc]), color: '--neg' }], legend: [['DOG', '--neg'], ['−정규 라플라시안', '--bad']] });
       }
+      // 합성은 표준편차가 아니라 분산이 더해진다는 점을 먼저 보여 준다.
+      let existingSigma = 1.6, targetSigma = 2.0;
+      const compositionResult = h('p', { class: 'note', 'aria-live': 'polite' });
+      function updateComposition() {
+        if (targetSigma <= existingSigma) {
+          compositionResult.textContent = '목표 σ를 현재 σ보다 크게 선택해 주세요. 현재 영상에 흐림을 추가하는 방식으로는 더 작은 σ를 만들 수 없습니다.';
+          return;
+        }
+        const extra = Math.sqrt(targetSigma ** 2 - existingSigma ** 2);
+        compositionResult.textContent = `현재 σ=${existingSigma.toFixed(1)}, 목표 σ=${targetSigma.toFixed(1)}이면 추가할 σ=√(${targetSigma.toFixed(1)}² − ${existingSigma.toFixed(1)}²)=${extra.toFixed(2)}입니다. 기존 분산과 추가 분산을 더하면 목표 분산이 됩니다.`;
+      }
+      const explanation = h('div', { class: 'card', style: { marginBottom: '18px' } },
+        h('h3', {}, '가우시안 합성과 DoG는 왜 필요할까?'),
+        h('p', {}, '가우시안 합성은 한 번 흐리게 만든 영상을 다시 흐리게 만드는 것입니다. 두 흐림을 합칠 때는 표준편차 σ가 아니라 분산 σ²가 더해집니다.'),
+        h('p', { class: 'note' }, 'G(σ₁) * G(σ₂) = G(√(σ₁² + σ₂²))'),
+        h('p', {}, '*는 컨볼루션입니다. 먼저 G(σ₁)로 흐리게 만들고 이어서 G(σ₂)를 적용하면, 원본에 오른쪽 가우시안을 한 번 적용한 결과와 같습니다. 예를 들어 σ₁=3이고 σ₂=4이면 최종 σ는 √(3²+4²)=5입니다.'),
+        h('p', {}, '이미 흐려진 영상에서 더 큰 목표 스케일을 만들 때는 기존 분산을 빼고 제곱근을 씌웁니다. 제곱근은 추가할 필터의 표준편차를 구하기 위해 필요합니다.'),
+        h('p', { class: 'note' }, '추가할 σ = √(목표 σ² − 현재 σ²)'),
+        h('div', { class: 'controls' },
+          UI.slider({ label: '현재 σ', min: 0.5, max: 3, step: 0.1, value: existingSigma, id: 'sf-current-sigma', fmt: v => v.toFixed(1), oninput: v => { existingSigma = v; updateComposition(); } }),
+          UI.slider({ label: '목표 σ', min: 0.6, max: 5, step: 0.1, value: targetSigma, id: 'sf-target-sigma', fmt: v => v.toFixed(1), oninput: v => { targetSigma = v; updateComposition(); } })), compositionResult,
+        h('h3', {}, 'DoG: 서로 다른 스케일의 영상은 어떻게 달라질까?'),
+        h('p', {}, '가우시안 영상은 흐려진 영상입니다. 그 자체만으로는 어느 위치가 특징적인지 바로 알기 어렵습니다. SIFT는 이웃한 두 가우시안 영상의 차이를 계산합니다.'),
+        h('p', { class: 'note' }, 'DoG = 더 많이 흐린 영상 − 덜 흐린 영상'),
+        h('p', {}, '두 영상에서 거의 변하지 않은 부분은 빼면 작아집니다. 스케일을 바꿀 때 밝기가 크게 달라진 부분은 양수 또는 음수로 남습니다. 예를 들어 같은 위치의 값이 80과 100이면 DoG는 80 − 100 = −20입니다.'),
+        h('p', {}, '정규 라플라시안은 특징에 적합한 스케일을 찾는 데 유용합니다. DoG는 k가 1에 가까울 때 정규 라플라시안에 상수배까지 근사합니다. 이미 만든 두 영상을 빼서 계산할 수 있으므로 SIFT는 DoG를 사용합니다.'),
+        h('p', { class: 'caption' }, 'DoG ≈ (k−1)σ²∇²L. 여기서 L은 σ로 흐리게 만든 영상입니다. 이 페이지는 더 흐린 영상에서 덜 흐린 영상을 빼므로 밝은 블롭 중심은 음수가 될 수 있습니다.'),
+        h('p', {}, 'SIFT는 DoG 영상에서 위치와 스케일의 이웃 26개를 비교합니다. 모두보다 크거나 모두보다 작은 점을 특징점의 후보로 삼습니다. 이후 대비가 낮은 후보 등을 걸러냅니다.'));
+      updateComposition();
+      root.append(explanation);
       root.append(h('div', { class: 'lab wide-code' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, pk.el, UI.slider({ label: '옥타브 수', min: 1, max: 3, step: 1, value: nOct, id: 'sf-o', oninput: v => { nOct = v; compute(); } }), UI.slider({ label: '대비 임계값 |DOG|', min: 0, max: 0.1, step: 0.005, value: thr, id: 'sf-t', fmt: v => v.toFixed(3), oninput: v => { thr = v; compute(); } }),
@@ -4881,7 +4911,7 @@ G G G G G G G G`;
             h('div', { class: 'row', style: { marginTop: '8px' } }, ...grids.map((g, i) => h('div', { class: 'col' }, h('span', { class: 'caption' }, ['(c) DOG(σ_{i−1}) 아래', '(b) DOG(σ_i) — X가 후보', '(a) DOG(σ_{i+1}) 위'][i]), g.el)))),
           h('div', { class: 'card' }, h('h3', {}, 'SIFT의 스케일 공간', h('small', {}, '그림 4-16')), pyr),
           h('div', { class: 'card' }, h('h3', {}, 'DOG ≈ 정규 라플라시안', h('small', {}, '식 (4.20)')), h('div', { class: 'controls' }, UI.slider({ label: 'k', min: 1.05, max: 2, step: 0.05, value: kk, id: 'sf-k', fmt: v => v.toFixed(2), oninput: v => { kk = v; dogPlot(); } })), dcv,
-            h('p', { class: 'caption' }, 'G(kσ) − G(σ) ≈ (k−1)σ²∇²G 이라서, DOG는 이미 σ²가 곱해진 정규 라플라시안(부호 반대, 상수배)입니다. k가 1에 가까울수록 두 곡선이 겹칩니다. Mikolajczyk(2002)의 실험에서 정규 라플라시안이 가장 안정적으로 극점을 만들었기 때문에, SIFT는 그것을 싸게 근사한 DOG를 씁니다.'),
+            h('p', { class: 'caption' }, 'G(kσ) − G(σ) ≈ (k−1)σ²∇²G 이라서, 페이지의 DoG 정의는 정규 라플라시안의 상수배에 근사합니다. 이 그래프는 모양을 비교하기 위해 두 곡선의 부호를 함께 뒤집고 각각 크기를 정규화했습니다. k가 1에 가까울수록 두 곡선이 비슷해집니다. Mikolajczyk(2002)의 실험에서 정규 라플라시안이 가장 안정적으로 극점을 만들었기 때문에, SIFT는 그것을 싸게 근사한 DOG를 씁니다.'),
             h('p', { class: 'caption' }, '공개 소프트웨어: David Lowe, Rob Hess, Andrea Vedaldi(VLFeat), OpenCV.'))),
         h('div', { class: 'stack' }, st.panel)));
       compute(); dogPlot();
