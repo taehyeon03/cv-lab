@@ -115,6 +115,8 @@
       ];
       const st = UI.Stepper({ code: CODE, title: '알고리즘 4-3 해리스 라플라스', render: fr => { frame = fr; draw(); } });
       const iv = UI.FeatView({ width: 520 }), ivM = UI.FeatView({ width: 330 }), cvs = h('canvas'), sumBox = h('div');
+      const spaceCanvas = h('canvas', { width: 800, height: 480, role: 'img', 'aria-label': '스케일에 따라 영상을 쌓고 특징점의 탐색 과정을 표시한 그림', style: { width: '100%', maxWidth: '800px', height: 'auto', display: 'block' } });
+      const spaceNote = h('p', { class: 'note', 'aria-live': 'polite' });
       function compute() {
         const f = blobScene(), maps = [], Ftemp = [];
         const sig = Array.from({ length: N + 1 }, (_, n) => s0 * xi ** n);
@@ -147,7 +149,14 @@
         }
         // merge duplicates converging to the same (y,x,σ)
         const uniq = []; for (const p of F) if (!uniq.some(q => Math.abs(q.y - p.y) <= 1 && Math.abs(q.x - p.x) <= 1 && Math.abs(q.sg - p.sg) < 0.2 * p.sg)) uniq.push(p);
-        data = { f, sig, maps, Ftemp, F: uniq, trace };
+        const layers = sig.map(sg => {
+          const img = CV.gaussianBlur(f, sg), layer = document.createElement('canvas');
+          layer.width = img[0].length; layer.height = img.length;
+          const ctx = layer.getContext('2d'), pixels = ctx.createImageData(layer.width, layer.height);
+          img.forEach((row, y) => row.forEach((v, x) => { const i = 4 * (y * layer.width + x); pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = Math.max(0, Math.min(255, v)); pixels.data[i + 3] = 255; }));
+          ctx.putImageData(pixels, 0, 0); return layer;
+        });
+        data = { f, sig, maps, Ftemp, F: uniq, trace, layers };
         const fr = [{ line: 1, phase: 1, note: `ξ=${xi}, s=${s}, σ0=${s0}, N=${N} — 원과 사각형의 크기가 서로 다른 합성 영상입니다.`, vars: { ξ: xi, s, σ0: s0, N } }];
         maps.forEach(mp => fr.push({ line: [3, 4, 5, 6], phase: 1, n: mp.n, vars: { n: mp.n, σn: +mp.sn.toFixed(3), σI: +mp.sn.toFixed(3), σD: +(s * mp.sn).toFixed(3), '극점 수': mp.pts.length, '|F_temp|': maps.slice(0, mp.n + 1).reduce((a, b) => a + b.pts.length, 0) }, note: `σ<sub>I</sub>=${mp.sn.toFixed(2)}, σ<sub>D</sub>=${(s * mp.sn).toFixed(2)}에서 해리스 맵의 지역 최대 ${mp.pts.length}개를 F_temp에 넣습니다. σ가 커질수록 작은 구조는 사라지고 큰 구조의 점이 남습니다.` }));
         fr.push({ line: [8, 9], phase: 2, note: `F_temp에 ${Ftemp.length}개 — 같은 코너가 여러 스케일에서 중복으로 잡혀 있습니다. 이제 각 점의 스케일을 정규 라플라시안으로 고릅니다.`, vars: { '|F_temp|': Ftemp.length } });
@@ -157,8 +166,42 @@
         st.load(fr, 0);
         sumBox.replaceChildren(UI.dataTable(['n', 'σI', 'σD', '지역 최대'], maps.map(mp => [mp.n, mp.sn.toFixed(2), (s * mp.sn).toFixed(2), mp.pts.length])));
       }
+      function drawSpace() {
+        const ctx = spaceCanvas.getContext('2d'), { sig, layers, maps, Ftemp } = data;
+        ctx.clearRect(0, 0, 800, 480);
+        const count = sig.length, gap = Math.min(42, 230 / Math.max(1, count - 1));
+        const ox = 120, oy = 380, dx = 38, dy = gap;
+        // 각 판은 기울어진 투영이며, 높이는 스케일 값이 아니라 순서를 나타낸다.
+        const point = (x, y, level) => [ox + x * 2.7 + y * .55 + level * dx, oy + y * .55 - level * dy];
+        const levelOf = sg => Math.max(0, Math.min(count - 1, Math.log(sg / sig[0]) / Math.log(xi)));
+        const active = frame.phase === 1 && frame.n !== undefined ? frame.n : frame.sp ? levelOf(frame.sp.sg) : -1;
+        for (let n = count - 1; n >= 0; n--) {
+          const [px, py] = point(0, 0, n);
+          ctx.save(); ctx.setTransform(2.7, 0, .55, .55, px, py); ctx.globalAlpha = n === Math.round(active) ? 1 : .78;
+          ctx.drawImage(layers[n], 0, 0); ctx.strokeStyle = n === Math.round(active) ? '#ef782e' : '#788981'; ctx.lineWidth = n === Math.round(active) ? 2 : 1; ctx.strokeRect(0, 0, 128, 96); ctx.restore();
+          ctx.fillStyle = '#405448'; ctx.font = '15px sans-serif'; ctx.fillText(`σ=${sig[n].toFixed(2)}`, px + 355, py + 22);
+          if (frame.phase === 1 && frame.n === n) maps[n].pts.forEach(([y, x]) => { const [a, b] = point(x, y, n); ctx.fillStyle = '#ff8a34'; ctx.beginPath(); ctx.arc(a, b, 3, 0, Math.PI * 2); ctx.fill(); });
+        }
+        function marker(x, y, level, color) { const [a,b] = point(x,y,level); ctx.beginPath(); ctx.arc(a,b,7,0,Math.PI*2); ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke(); return [a,b]; }
+        if (frame.phase === 2 && frame.sp) {
+          const sp = frame.sp, l = levelOf(sp.sg), from = marker(sp.x, sp.y, l, '#2f6fb0');
+          if (!sp.fail) {
+            const to = point(sp.nx, sp.ny, levelOf(sp.sn));
+            ctx.beginPath(); ctx.moveTo(...from); ctx.lineTo(...to); ctx.strokeStyle = '#ef782e'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]); marker(sp.nx, sp.ny, levelOf(sp.sn), '#ef782e');
+          }
+          spaceNote.textContent = sp.fail ? '파란 점이 현재 후보입니다. 주변 스케일에서 라플라시안의 극점을 찾지 못해 후보를 버립니다.' : `파란 점은 현재 후보입니다. 주황 점은 새 스케일에서 다시 찾은 위치입니다. σ ${sp.sg.toFixed(2)} → ${sp.sn.toFixed(2)}입니다.`;
+        } else if (frame.phase === 1 && frame.n !== undefined) {
+          spaceNote.textContent = `강조된 판은 σ=${sig[frame.n].toFixed(2)}입니다. 주황 점은 이 판에서 해리스 응답이 높은 위치입니다.`;
+        } else if (frame.phase === 3) {
+          spaceNote.textContent = '스케일과 위치가 안정된 점은 아래 영상에서 확인할 수 있습니다.';
+        } else {
+          spaceNote.textContent = `각 판은 같은 영상을 다른 σ로 흐리게 만든 결과입니다. ξ=${xi.toFixed(2)}를 곱해 다음 스케일을 정합니다.`;
+        }
+        ctx.fillStyle = '#26372d'; ctx.font = 'bold 16px sans-serif'; ctx.fillText('σ: 스케일이 커지는 방향 ↗', 28, 35); ctx.fillText('x →', 385, 466); ctx.fillText('y ↘', 95, 459);
+      }
       function draw() {
         if (!data || !frame) return;
+        drawSpace();
         const { f, maps, Ftemp, F, trace } = data;
         let marks = [];
         if (frame.phase === 1 && frame.n !== undefined) {
@@ -179,6 +222,7 @@
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('div', { class: 'controls' }, UI.slider({ label: 'ξ', min: 1.2, max: 1.6, step: 0.05, value: xi, id: 'hl-xi', fmt: v => v.toFixed(2), oninput: v => { xi = v; compute(); } }), UI.slider({ label: 's', min: 0.5, max: 1, step: 0.05, value: s, id: 'hl-s', fmt: v => v.toFixed(2), oninput: v => { s = v; compute(); } }), UI.slider({ label: 'N', min: 3, max: 7, step: 1, value: N, id: 'hl-n', oninput: v => { N = v; compute(); } }), UI.slider({ label: '해리스 임계값 (×max)', min: 0.01, max: 0.3, step: 0.01, value: thr, id: 'hl-t', fmt: v => v.toFixed(2), oninput: v => { thr = v; compute(); } })),
             h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 420px' } }, iv.el), h('div', { class: 'col', style: { flex: '1 1 300px' } }, ivM.el, h('div', {}, h('span', { class: 'caption' }, '[0.7σ, 1.4σ]에서 정규 라플라시안'), cvs)))),
+          h('div', { class: 'card' }, h('h3', {}, '스케일 공간을 한눈에 보기'), h('p', { class: 'caption' }, '각 판은 같은 영상을 서로 다른 σ로 흐리게 만든 결과입니다. 높이는 스케일의 순서이며 실제 거리나 물체의 깊이가 아닙니다. 실행 단계를 움직이면 탐색이 함께 표시됩니다.'), spaceCanvas, spaceNote, h('p', { class: 'caption' }, '주황 점: 해리스가 찾은 위치 · 파란 점: 현재 후보 · 주황 선과 점: 스케일과 위치가 바뀐 결과. 판 사이의 높이는 이해를 돕는 그림입니다.')),
           h('div', { class: 'card' }, h('h3', {}, '단계 1 요약'), sumBox, h('p', { class: 'caption' }, '교재 기본값은 ξ=1.4, s=0.7. σD는 미분할 때, σI는 미분 곱을 모을 때(적분) 쓰는 스케일입니다. σD² 곱은 정규 라플라시안의 σ²와 같은 이유(스케일 사이 공정한 비교)입니다.'))),
         h('div', { class: 'stack' }, st.panel)));
       compute();
