@@ -298,6 +298,7 @@ const UI = (() => {
         if (m.kind === 'cross') { const s = (m.size || 4) * dpr; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.stroke(); }
         else if (m.kind === 'dot') { ctx.beginPath(); ctx.arc(x, y, (m.size || 3) * dpr, 0, 7); ctx.fill(); }
         else if (m.kind === 'rect') { ctx.strokeRect(m.x * sc + 1, m.y * sc + 1, m.ww * sc - 2, m.hh * sc - 2); }
+        else if (m.kind === 'poly') { ctx.beginPath(); m.pts.forEach(([py, px], k) => (k ? ctx.lineTo(P(px), P(py)) : ctx.moveTo(P(px), P(py)))); if (m.closed !== false) ctx.closePath(); ctx.stroke(); }
         else { ctx.beginPath(); ctx.arc(x, y, Math.max(2 * dpr, m.r * sc), 0, 7); ctx.stroke(); }
       }
     }
@@ -412,11 +413,18 @@ const UI = (() => {
   };
   // photos from the Chapter 4 slides (src/fig4.js)
   function fromFig(F) {
-    const bin = atob(F.b64), gray = [];
-    for (let y = 0; y < F.h; y++) { const r = []; for (let x = 0; x < F.w; x++) r.push(bin.charCodeAt(y * F.w + x)); gray.push(r); }
-    return { gray, rgb: gray.map(r => r.map(v => [v, v, v])), w: F.w, h: F.h };
+    const bin = atob(F.b64), gray = [], rgb = [];
+    for (let y = 0; y < F.h; y++) {
+      const g = [], c = [];
+      for (let x = 0; x < F.w; x++) {
+        if (F.rgb) { const k = (y * F.w + x) * 3, p = [bin.charCodeAt(k), bin.charCodeAt(k + 1), bin.charCodeAt(k + 2)]; c.push(p); g.push(Math.round(0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2])); }
+        else { const v = bin.charCodeAt(y * F.w + x); g.push(v); c.push([v, v, v]); }
+      }
+      gray.push(g); rgb.push(c);
+    }
+    return { gray, rgb, w: F.w, h: F.h };
   }
-  if (typeof FIG4 !== 'undefined') for (const k of Object.keys(FIG4)) SCENES[k] = [FIG4[k].title, () => fromFig(FIG4[k])];
+  for (const F of [typeof FIG4 !== 'undefined' ? FIG4 : {}, typeof FIG5 !== 'undefined' ? FIG5 : {}]) for (const k of Object.keys(F)) SCENES[k] = [F[k].title, () => fromFig(F[k])];
   // page-local picker (does not change the shared image used by chapters 2–3)
   function figPicker(def, onchange) {
     const cache = {}, get = k => (cache[k] || (cache[k] = SCENES[k][1]()));
@@ -424,7 +432,7 @@ const UI = (() => {
     const s = h('select', { 'aria-label': '실습 영상' }, Object.entries(SCENES).map(([k, [t]]) => h('option', { value: k }, t)));
     s.value = key;
     s.addEventListener('change', () => { key = s.value; onchange(); });
-    return { el: h('span', { class: 'ctl' }, h('span', {}, '실습 영상'), s), gray: () => get(key).gray, set: k => { key = k; s.value = k; }, get key() { return key; } };
+    return { el: h('span', { class: 'ctl' }, h('span', {}, '실습 영상'), s), gray: () => get(key).gray, rgb: () => get(key).rgb, set: k => { key = k; s.value = k; }, get key() { return key; } };
   }
   const APP_IMG = { cur: null, key: 'shapes', subs: new Set() };
   function currentImage() { if (!APP_IMG.cur) APP_IMG.cur = SCENES[APP_IMG.key][1](); return APP_IMG.cur; }

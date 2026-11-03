@@ -28,16 +28,16 @@ const APP = (() => {
 
   function intro(root) {
     root.append(
-      h('header', { class: 'mod-head' }, h('div', { class: 'mod-num' }, 'CV'), h('h1', {}, '컴퓨터비전개론 알고리즘 실습실'), h('div', { class: 'src' }, '2강 영상처리 · 3강 에지 검출 · 4강 지역 특징 검출 — 강의자료의 알고리즘을 직접 돌려 보는 곳')),
+      h('header', { class: 'mod-head' }, h('div', { class: 'mod-num' }, 'CV'), h('h1', {}, '컴퓨터비전개론 알고리즘 실습실'), h('div', { class: 'src' }, '2강 영상처리 · 3강 에지 검출 · 4강 지역 특징 검출 · 5강 영상 분할 — 강의자료의 알고리즘을 직접 돌려 보는 곳')),
       slidebar(),
       h('p', { class: 'lead', html: '각 페이지는 <b>① 강의자료의 수식</b>, <b>② 값을 직접 바꿀 수 있는 시각화</b>, <b>③ 교재 의사 코드와 한 줄씩 맞춰 보는 단계 실행기</b>로 되어 있습니다. 단계 실행기는 Python Tutor처럼 ◀ ▶ 버튼(또는 키보드 ← →)으로 한 단계씩 움직이며, 지금 실행 중인 코드 줄이 노란색으로 표시되고 변수 값과 호출 스택이 함께 바뀝니다. 격자의 숫자는 대부분 클릭해서 바꿀 수 있습니다.' }),
     );
-    const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출', practice: '직접 풀어 보기' };
-    for (const ch of ['2', '3', '4', 'practice']) {
+    const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출', 5: 'Chapter 5 · 영상 분할', practice: '직접 풀어 보기' };
+    for (const ch of ['2', '3', '4', '5', 'practice']) {
       root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, CH[ch]));
       root.append(h('div', { class: 'intro-grid' }, mods.filter(m => m.ch === ch).map(m => h('a', { href: '#' + m.id }, h('div', { class: 'card' }, h('span', { class: 'n' }, m.num + (m.star ? '  · 단계 실행' : '')), h('b', {}, m.title), h('span', { class: 'caption' }, m.blurb))))));
     }
-    root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 4-1, 4-2, 그림 3-22, 3-25, 4-9)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
+    root.append(h('p', { class: 'caption', style: { marginTop: '28px' } }, '예제 숫자는 강의자료(교재 예제 2-1, 2-2, 2-5, 2-6, 3-1, 3-2, 3-3, 4-1, 4-2, 5-1, 5-2, 그림 3-22, 3-25, 4-9, 5-7, 5-16, 5-20)와 같게 맞췄고, 결과도 교재 값과 대조해 두었습니다.'));
   }
 
   // Each answer starts with the intuition, then shows the mathematics separately.
@@ -82,6 +82,28 @@ const APP = (() => {
     ],
     surf: [
       ['SIFT와 SURF는 스케일을 어떻게 다르게 바꾸나요?', R`<p class="faq-key">SIFT는 영상의 해상도를 바꾸고, SURF는 마스크 크기를 바꿉니다.</p><ul><li><b>SIFT:</b> 영상을 스무딩하고 축소하면서 특징을 찾습니다.</li><li><b>SURF:</b> 영상은 유지하고 박스 마스크를 점점 키웁니다.</li></ul><div class="faq-math">$$9,\;15,\;21,\;27,\;\ldots$$</div><p class="faq-note">SURF는 적분 영상을 미리 만들어 두므로, 사각형 영역의 합은 크기와 관계없이 네 모서리 값을 조회해 구합니다. 마스크가 커져도 사각형 합 하나를 구하는 비용은 일정합니다.</p>`],
+    ],
+    otsu2: [
+      ['임계값이 하나일 때와 무엇이 다른가요?', R`<p class="faq-key">찾는 값이 \(t\) 하나에서 \((t_1,t_2)\) 쌍으로 늘고, 부류가 셋이 됩니다.</p><div class="faq-math">$$v_{between}=\sum_{k=0}^{2}w_k(\mu_k-\mu_g)^2$$</div><p>세 부류의 평균이 전체 평균에서 멀수록 잘 나뉜 것입니다. 가능한 쌍이 \((L-3)(L-2)/2\)개뿐이라 모두 계산해 봅니다(\(L=8\)이면 15쌍, \(L=256\)이면 32,385쌍).</p><p class="faq-note">부류를 넷 이상으로 늘릴 때도 같은 식을 항만 늘려 쓰면 됩니다(연습문제 2).</p>`],
+    ],
+    kmeans: [
+      ['k-means가 자연 영상에서 자글자글한 이유는?', R`<p class="faq-key">색이 비슷한지만 보고, 두 화소가 서로 가까운지는 전혀 보지 않기 때문입니다.</p><p>해바라기 밭처럼 같은 물체 안에 노랑·갈색·초록이 섞여 있으면 화소마다 다른 군집으로 갑니다. 반대로 멀리 떨어진 하늘과 흰 건물이 같은 군집이 되기도 합니다.</p><p class="faq-note">해결 방향: 이웃 관계를 쓰는 그래프 방법(5.3), 위치와 색을 함께 쓰는 민시프트(5.4).</p>`],
+    ],
+    mst: [
+      ['intra(C)가 왜 “가장 큰 MST 에지”인가요?', R`<p class="faq-key">연결요소 안에서 가장 크게 끊어진 “틈”이 얼마인지를 재는 값입니다.</p><div class="faq-math">$$intra(C)=\max_{e\in MST(C)}w_e$$</div><p>MST는 모든 노드를 가장 작은 에지들로 잇습니다. 그중 가장 큰 에지는 “이 영역을 이어 붙이려면 적어도 이만큼의 차이는 견뎌야 한다”는 뜻입니다. 두 화소가 직접은 많이 달라도, 작은 에지들로 이어진 길이 있으면 intra는 작게 유지됩니다.</p>`],
+      ['k는 무슨 역할을 하나요?', R`<p class="faq-key">작은 영역에 주는 덤 \(\tau(C)=k/|C|\)의 크기입니다.</p><div class="faq-math">$$w_{pq}\le\min\big(intra(C_p)+\tfrac{k}{|C_p|},\ intra(C_q)+\tfrac{k}{|C_q|}\big)\Rightarrow\text{합침}$$</div><p>처음에는 모든 영역의 크기가 1이라 \(k\)만큼의 차이까지 합쳐집니다. 영역이 커질수록 덤이 줄어 더 까다로워집니다. \(k\)가 작으면 세밀하게(영역 많음), 크면 거칠게(영역 적음) 나뉩니다.</p>`],
+    ],
+    ncut: [
+      ['고유 벡터가 왜 분할을 알려 주나요?', R`<p class="faq-key">ncut 최소 문제에서 “각 노드가 \(C_1\)이냐 \(C_2\)냐”를 실수값으로 풀어 주면 고유값 문제가 되기 때문입니다.</p><div class="faq-math">$$(\mathbf D-\mathbf W)\mathbf y=\lambda\mathbf D\mathbf y$$</div><p>가장 작은 고유값 0의 고유 벡터는 모든 성분이 같아서(자르지 않음) 쓸모가 없습니다. 두 번째로 작은 고유값의 고유 벡터에서 부호나 크기가 비슷한 노드끼리 묶으면 근사 최적 분할이 됩니다.</p><p class="faq-note">4강의 2×2 고윳값 계산이, 여기서는 노드 수 × 노드 수 행렬로 커진 것입니다.</p>`],
+    ],
+    meanshift: [
+      ['민시프트는 왜 “언덕 오르기”인가요?', R`<p class="faq-key">한 번 이동할 때마다 커널 안 샘플의 평균 쪽, 즉 샘플이 더 빽빽한 쪽으로 가기 때문입니다.</p><div class="faq-math">$$\mathbf m(\mathbf y_t)=\frac{\sum_i(\mathbf x_i-\mathbf y_t)\,k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}{\sum_i k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}$$</div><p>밀도가 높은 쪽 샘플이 더 많이 평균에 들어가 그쪽으로 끌려갑니다. 이동량은 봉우리에 가까울수록 작아지고, 꼭대기에서 0이 됩니다.</p><p class="faq-note">함수 \(p(\mathbf x)\)를 그리지 않고도 봉우리를 찾는 점이 핵심입니다(차원의 저주 회피).</p>`],
+    ],
+    watershed: [
+      ['7행에서 이웃 번호가 “모두 같을 때만” 번호를 주는 이유는?', R`<p class="faq-key">서로 다른 유역의 물이 만나는 화소에는 번호를 주지 않아야, 그 화소가 경계(댐)로 남기 때문입니다.</p><p>이웃 번호가 1과 2로 섞인 화소에 아무 번호나 주면 두 유역이 그 화소를 통해 이어져 경계가 사라집니다. 그래서 끝까지 번호를 받지 못한 화소가 워터셰드가 되고, 결과는 항상 닫힌 경계가 됩니다(연습문제 6).</p>`],
+    ],
+    graphcut: [
+      ['O로 지정한 화소에 S와 100, T와 0을 주는 이유는?', R`<p class="faq-key">사용자의 표시를 절대 어기지 않게 하는 “엄격한 조건”입니다.</p><ul><li>S와의 에지가 아주 크면, 그 에지를 자르는 절단은 비용이 너무 커서 최소 절단이 될 수 없습니다 → 항상 S 쪽(물체)에 남음</li><li>T와의 에지가 0이면 처음부터 끊긴 것과 같습니다</li></ul><p>B로 지정한 화소는 반대(T와 큰 값, S와 0)입니다. 나머지 화소는 식 (5.28)(5.29)의 확률과 이웃 유사도의 균형으로 정해집니다.</p>`],
     ],
     backproj: [
       ['얼굴 검출에서 비율을 왜 1로 제한하나요?', R`<p class="faq-key">얼굴 모델에 흔하고 검사 영상에는 드문 색에 높은 점수를 주되, 최대 점수를 1로 맞추는 것입니다.</p><div class="faq-math">$$h_r=\min\left(\frac{\hat h_m}{\hat h_i},\;1\right)$$</div><p>분자는 얼굴 모델에서 그 색의 비율, 분모는 검사 영상 전체에서 그 색의 비율입니다. 분모가 작으면 나눈 값이 커집니다.</p><div class="faq-math">$$\frac{0.30}{0.05}=6\ \longrightarrow\ 1,\qquad\frac{0.10}{0.40}=0.25\ \longrightarrow\ 0.25$$</div><p><b>1은 얼굴임이 확실하다는 뜻이 아닙니다.</b> 피부색 손이나 벽에도 높은 점수가 나올 수 있습니다. 색의 분포만 비교하기 때문입니다.</p><p class="faq-note">이 결과는 이진 영상이 아닙니다. 0과 1 사이의 중간 점수도 남습니다. 분모가 0인 칸은 별도 처리가 필요하며, 이 실습에서는 0으로 처리합니다.</p>`],
@@ -135,7 +157,7 @@ const APP = (() => {
 
   function nav() {
     const rail = document.getElementById('rail'), msel = document.getElementById('msel');
-    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['4', '4강 · 지역 특징 검출'], ['practice', '문제 풀기']];
+    const groups = [['2', '2강 · 영상처리'], ['3', '3강 · 에지 검출'], ['4', '4강 · 지역 특징 검출'], ['5', '5강 · 영상 분할'], ['practice', '문제 풀기']];
     rail.append(h('a', { href: '#', 'data-id': '' }, h('span', { class: 'n' }, '—'), h('span', {}, '개요')));
     msel.append(h('option', { value: '' }, '개요'));
     for (const [ch, label] of groups) {
