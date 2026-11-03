@@ -5718,13 +5718,16 @@ const SEG5UI = (() => {
       SEG5UI.flow(root, '5.2', { prev: '명암 임계화는 명암 하나만 보고, 구간도 직접 나눠야 했습니다.', idea: '컬러 (r, g, b)를 3차원 점으로 보고 <b>가까운 점끼리 묶습니다</b>. 군집 수 k는 사람이 정합니다.', next: '색만 보고 화소의 <b>위치(지리적 근접성)는 무시</b>하므로 결과가 자글자글합니다(그림 5-6) → 위치까지 쓰는 그래프 방법(5.3)과 민시프트(5.4).' });
       // twelve colour pixels (r, g, b) in a 3×4 image
       const PIX = [[[220, 40, 30], [210, 60, 40], [40, 200, 60], [60, 190, 50]], [[230, 70, 50], [50, 60, 200], [40, 180, 70], [30, 40, 210]], [[200, 50, 60], [60, 70, 190], [45, 50, 220], [70, 210, 80]]];
-      let k = 3, init = [0, 1, 2], frame = null;
+      // default centres: one red, one green, one blue pixel (x1, x3, x6) so the first run already gives a sensible split
+      let k = 3, init = [0, 2, 5], frame = null;
       const X = PIX.flat();
       const CODE = ['화소를 x_i=(r,g,b)로 변환하여 X={x_1,…,x_n}을 구성한다.', 'k개의 군집 중심 Z={z_1,…,z_k}를 초기화한다.', 'while(TRUE) {', '  for(i=1 to n) x_i를 가장 가까운 군집 중심에 배정한다.', '  if(첫 배정이 아니고 이전 배정과 같음) break;', '  for(j=1 to k) z_j에 배정된 샘플의 평균으로 z_j를 대치한다.', '}', 'for(j=1 to k) z_j에 배정된 화소를 j로 번호를 매긴다.'];
       const st = UI.Stepper({ code: CODE, title: '알고리즘 5-2 k-means', render: fr => { frame = fr; draw(); } });
-      const gP = UI.GridView({ rows: 3, cols: 4, cs: 56, fs: 10, label: '입력 화소', cell: (y, x) => { const i = y * 4 + x, c = X[i], a = frame && frame.assign; return { bg: css(c), color: '#fff', t: `x${i + 1}`, badge: a ? 'z' + (a[i] + 1) : undefined, badgeColor: '#fff', cls: frame && frame.cur === i ? 'cur' : '' }; }, onClick: (y, x) => { const i = y * 4 + x; if (!init.includes(i)) { init = [...init.slice(1), i]; rebuild(); } } });
+      const gP = UI.GridView({ rows: 3, cols: 4, cs: 56, fs: 10, label: '입력 화소', cell: (y, x) => { const i = y * 4 + x, c = X[i], a = frame && frame.assign; return { bg: css(c), color: '#fff', t: `x${i + 1}`, badge: a && a[i] !== null && a[i] !== undefined ? 'z' + (a[i] + 1) : init.includes(i) ? '★' : undefined, badgeColor: '#fff', cls: frame && frame.cur === i ? 'cur' : '' }; }, onClick: (y, x) => { const i = y * 4 + x; init = init.includes(i) ? init : [...init.slice(1), i]; rebuild('end'); } });
+      const initBox = h('p', { class: 'caption' });
       const scat = h('canvas'), distBox = h('div'), gOut = UI.GridView({ rows: 3, cols: 4, cs: 40, fs: 12, label: '분할 결과', cell: (y, x) => { const a = frame && frame.final ? frame.assign : null; if (!a) return {}; const z = frame.Z[a[y * 4 + x]]; return { bg: css(z), color: '#fff', t: a[y * 4 + x] + 1 }; } });
-      function rebuild() {
+      // at: 0 = start of the trace (first load), 'end' = jump to the finished result so a control change is visible at once
+      function rebuild(at = 'end') {
         init = init.slice(-k); while (init.length < k) init.push([...Array(12).keys()].find(i => !init.includes(i)));
         const km = SEG.kmeans(X, k, init), fr = [{ line: 1, Z: null, note: '12개 화소를 RGB 공간의 점 x₁~x₁₂로 옮깁니다. 오른쪽 위 그림은 (R, B) 평면에 투영한 모습입니다.' }];
         fr.push({ line: 2, Z: km.trace[0].Z, note: `초기 중심: ${init.map(i => 'x' + (i + 1)).join(', ')} (영상에서 화소를 클릭하면 바꿀 수 있음). 초기화가 결과에 영향을 줍니다.`, vars: Object.fromEntries(km.trace[0].Z.map((z, j) => ['z' + (j + 1), `(${z.map(v => Math.round(v)).join(',')})`])) });
@@ -5739,7 +5742,9 @@ const SEG5UI = (() => {
           } else fr.push({ line: 6, Z: tr.Z, assign: tr.assign, upd: true, note: '각 중심을 배정된 화소들의 평균으로 옮깁니다: ' + tr.Z.map((z, j) => `z${j + 1} = (${z.map(v => v.toFixed(1)).join(', ')})`).join(', '), vars: Object.fromEntries(tr.Z.map((z, j) => ['z' + (j + 1), `(${z.map(v => Math.round(v)).join(',')})`])) });
         }
         fr.push({ line: 8, Z: km.Z, assign: km.assign, final: true, note: `군집 번호를 화소에 매기면 분할 결과입니다. 아래 결과 격자는 각 군집의 중심 색으로 칠했습니다.`, vars: { k } });
-        st.load(fr, 0);
+        st.load(fr, at);
+        const rounds = km.trace.filter(t => t.assign && !t.update).length, groups = km.Z.map((_, j) => X.map((_, i) => i).filter(i => km.assign[i] === j).map(i => 'x' + (i + 1)));
+        initBox.innerHTML = `초기 중심 <b>${init.map(i => 'x' + (i + 1)).join(', ')}</b> (★) → ${rounds}회 배정 후 수렴: ` + groups.map((g, j) => `z${j + 1} = {${g.join(', ')}}`).join(', ') + `. ◀ 버튼으로 처음부터 한 단계씩 되짚어 볼 수 있습니다. 빨강 둘을 초기 중심으로 고르면(x1, x2 클릭) 빨강이 둘로 갈리고 초록·파랑이 합쳐지는 것 — 초기화가 결과를 바꾸는 예입니다.`;
       }
       function draw() {
         gP.draw(); gOut.draw();
@@ -5766,14 +5771,14 @@ const SEG5UI = (() => {
       pk = UI.figPicker('sun', () => real());
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
-          h('div', { class: 'card' }, h('h3', {}, '12개 화소로 따라가기'), h('div', { class: 'controls' }, UI.slider({ label: 'k', min: 2, max: 4, step: 1, value: k, id: 'km-k', oninput: v => { k = v; rebuild(); } }), h('button', { class: 'btn', type: 'button', onclick: () => { const r = Math.random; init = []; while (init.length < k) { const i = Math.floor(r() * 12); if (!init.includes(i)) init.push(i); } rebuild(); } }, '초기 중심 무작위')),
+          h('div', { class: 'card' }, h('h3', {}, '12개 화소로 따라가기'), h('div', { class: 'controls' }, UI.slider({ label: 'k', min: 2, max: 4, step: 1, value: k, id: 'km-k', oninput: v => { k = v; rebuild(); } }), h('button', { class: 'btn', type: 'button', onclick: () => { const r = Math.random; init = []; while (init.length < k) { const i = Math.floor(r() * 12); if (!init.includes(i)) init.push(i); } rebuild(); } }, '초기 중심 무작위'), h('button', { class: 'btn', type: 'button', onclick: () => { init = [0, 2, 5, 3].slice(0, k); rebuild(); } }, '기본 초기 중심으로')), initBox,
             h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col' }, h('span', { class: 'caption' }, '입력 3×4 (배지 = 배정된 중심, 클릭 = 초기 중심으로)'), gP.el, h('span', { class: 'caption' }, '분할 결과 (중심 색)'), gOut.el), h('div', { class: 'col' }, h('span', { class: 'caption' }, 'RGB 공간을 (R, B)로 투영 · × = 중심'), scat), h('div', { class: 'col' }, distBox))),
           h('div', { class: 'card' }, h('h3', {}, '해바라기 영상에 적용', h('small', {}, '그림 5-5 · 5-6')),
             h('div', { class: 'controls' }, pk.el, UI.slider({ label: 'k', min: 2, max: 10, step: 1, value: kk, id: 'km-kk', oninput: v => { kk = v; real(); } }), h('button', { class: 'btn', type: 'button', onclick: () => { seed++; real(); } }, '초기 중심 다시 뽑기'),
               h('span', { class: 'ctl' }, (() => { const c = h('input', { type: 'checkbox', id: 'km-xy' }); c.addEventListener('change', () => { useXY = c.checked; real(); }); return c; })(), h('label', { for: 'km-xy' }, '위치 (y, x)도 특징에 넣기'))),
             h('div', { class: 'row', style: { marginTop: '10px' } }, h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivA.el), h('div', { class: 'col', style: { flex: '1 1 340px' } }, ivB.el)), info)),
         h('div', { class: 'stack' }, st.panel)));
-      rebuild(); real();
+      rebuild(0); real();
     },
   });
 
