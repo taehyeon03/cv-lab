@@ -32,6 +32,15 @@ const APP = (() => {
       slidebar(),
       h('p', { class: 'lead', html: '각 페이지는 <b>① 강의자료의 수식</b>, <b>② 값을 직접 바꿀 수 있는 시각화</b>, <b>③ 교재 의사 코드와 한 줄씩 맞춰 보는 단계 실행기</b>로 되어 있습니다. 단계 실행기는 Python Tutor처럼 ◀ ▶ 버튼(또는 키보드 ← →)으로 한 단계씩 움직이며, 지금 실행 중인 코드 줄이 노란색으로 표시되고 변수 값과 호출 스택이 함께 바뀝니다. 격자의 숫자는 대부분 클릭해서 바꿀 수 있습니다.' }),
     );
+    const FLOW = [
+      ['2강', '영상처리', '화소 값을 다듬는다', '히스토그램·이진화·필터(컨볼루션)·모폴로지 — 뒤의 모든 장이 쓰는 기본 도구', 'hist'],
+      ['3강', '에지 검출', '밝기가 급변하는 곳을 찾는다', '미분 → 가우시안·LOG → 캐니 → 에지를 선분으로 (허프·RANSAC)', 'deriv'],
+      ['4강', '지역 특징', '다시 찾기 쉬운 점을 찾는다', '모라벡 → 해리스 → 위치 찾기 → 크기까지 (스케일 공간, SIFT, SURF)', 'feat'],
+      ['5강', '영상 분할', '화소를 물체별 영역으로 묶는다', '단순 규칙 → 그래프·민시프트·워터셰드 → 사용자와 함께 (스네이크, 그래프 절단)', 'seg51'],
+    ];
+    root.append(h('div', { class: 'card course-flow' }, h('h3', {}, '전체 흐름', h('small', {}, '앞 장의 결과가 다음 장의 재료가 됩니다')),
+      h('div', { class: 'cf-row' }, FLOW.map(([n, t, goal, how, id]) => h('a', { href: '#' + id }, h('small', {}, n), h('b', {}, t), h('span', { class: 'goal' }, goal), h('span', { class: 'how' }, how)))),
+      h('p', { class: 'caption' }, '처음이라면: 각 페이지 맨 위의 “쉽게 말하면” 카드를 먼저 읽고 → “먼저 해 볼 것”을 해 본 다음 → 수식과 단계 실행기를 보세요. 페이지 아래의 이전·다음 버튼으로 순서대로 넘어갈 수 있습니다.')));
     const CH = { 2: 'Chapter 2 · 영상처리', 3: 'Chapter 3 · 에지 검출', 4: 'Chapter 4 · 지역 특징 검출', 5: 'Chapter 5 · 영상 분할', practice: '직접 풀어 보기' };
     for (const ch of ['2', '3', '4', '5', 'practice']) {
       root.append(h('h2', { style: { fontSize: '17px', margin: '26px 0 10px' } }, CH[ch]));
@@ -148,6 +157,26 @@ const APP = (() => {
     const after = el.querySelector('.formula-card') || el.querySelector('.lead');
     if (after) after.after(box); else el.prepend(box);
   }
+  // plain-language card right under the lead, before the formulas
+  function insertEasy(el, e) {
+    const [one, like, steps, tryit, terms] = e;
+    const box = h('div', { class: 'card easy' },
+      h('h3', {}, '쉽게 말하면', h('small', {}, '수식 보기 전에')),
+      h('p', { class: 'easy-one' }, one),
+      h('div', { class: 'easy-grid' },
+        h('div', {}, h('h4', {}, '비유'), h('p', {}, like)),
+        h('div', {}, h('h4', {}, '세 단계'), h('ol', {}, steps.map(t => h('li', {}, t)))),
+        h('div', {}, h('h4', {}, '용어'), h('dl', {}, terms.flatMap(([t, d]) => [h('dt', {}, t), h('dd', {}, d)])))),
+      h('p', { class: 'easy-try' }, h('b', {}, '먼저 해 볼 것 '), tryit));
+    const lead = el.querySelector('.lead');
+    if (lead) lead.after(box); else el.prepend(box);
+  }
+  // previous / next page links at the bottom, in sidebar order
+  function insertPager(el, m) {
+    const i = mods.indexOf(m), prev = mods[i - 1], next = mods[i + 1];
+    const link = (x, dir) => (x ? h('a', { href: '#' + x.id, class: dir }, h('small', {}, dir === 'prev' ? '← 이전' : '다음 →'), h('b', {}, `${x.num} ${x.title}`)) : h('span'));
+    el.append(h('nav', { class: 'pager', 'aria-label': '이전·다음 페이지' }, link(prev, 'prev'), h('a', { href: '#', class: 'home' }, '개요'), link(next, 'next')));
+  }
   function insertFaq(el, items) {
     const box = h('div', { class: 'card faq' }, h('h3', {}, '헷갈리기 쉬운 점', h('small', {}, '질문을 눌러 펼치기')),
       items.map(([q, a]) => h('details', {}, h('summary', {}, q), h('div', { class: 'a', html: a }))));
@@ -184,6 +213,8 @@ const APP = (() => {
       mounted.set(key, el);
       if (m) m.mount(el, m); else intro(el);
       if (m && FAQ[m.id]) insertFaq(el, FAQ[m.id]);
+      if (m && typeof EASY !== 'undefined' && EASY[m.id]) insertEasy(el, EASY[m.id]);
+      if (m) insertPager(el, m);
       if (m && NOTES[m.id]) insertNotes(el, NOTES[m.id]);
       UI.typeset(el);
     }
