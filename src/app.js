@@ -106,7 +106,7 @@ const APP = (() => {
       ['고유 벡터가 왜 분할을 알려 주나요?', R`<p class="faq-key">ncut 최소 문제에서 “각 노드가 \(C_1\)이냐 \(C_2\)냐”를 실수값으로 풀어 주면 고유값 문제가 되기 때문입니다.</p><div class="faq-math">$$(\mathbf D-\mathbf W)\mathbf y=\lambda\mathbf D\mathbf y$$</div><p>가장 작은 고유값 0의 고유 벡터는 모든 성분이 같아서(자르지 않음) 쓸모가 없습니다. 두 번째로 작은 고유값의 고유 벡터에서 부호나 크기가 비슷한 노드끼리 묶으면 근사 최적 분할이 됩니다.</p><p class="faq-note">4강의 2×2 고윳값 계산이, 여기서는 노드 수 × 노드 수 행렬로 커진 것입니다.</p>`],
     ],
     meanshift: [
-      ['민시프트는 왜 “언덕 오르기”인가요?', R`<p class="faq-key">한 번 이동할 때마다 커널 안 샘플의 평균 쪽, 즉 샘플이 더 빽빽한 쪽으로 가기 때문입니다.</p><div class="faq-math">$$\mathbf m(\mathbf y_t)=\frac{\sum_i(\mathbf x_i-\mathbf y_t)\,k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}{\sum_i k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}$$</div><p>밀도가 높은 쪽 샘플이 더 많이 평균에 들어가 그쪽으로 끌려갑니다. 이동량은 봉우리에 가까울수록 작아지고, 꼭대기에서 0이 됩니다.</p><p class="faq-note">함수 \(p(\mathbf x)\)를 그리지 않고도 봉우리를 찾는 점이 핵심입니다(차원의 저주 회피).</p>`],
+      ['민시프트는 왜 “언덕 오르기”인가요?', R`<p class="faq-key">한 번 이동할 때마다 커널 안 샘플의 평균 쪽, 즉 샘플이 더 빽빽한 쪽으로 가기 때문입니다.</p><div class="faq-math">$$\mathbf m(\mathbf y_t)=\frac{\sum_i(\mathbf x_i-\mathbf y_t)\,k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}{\sum_i k\big(\frac{\mathbf x_i-\mathbf y_t}{h}\big)}$$</div><p>밀도가 높은 쪽 샘플이 더 많이 평균에 들어가 그쪽으로 끌려갑니다. 창 안의 가중 평균이 현재 중심과 같으면 이동량이 0입니다. 시작점에 따라 서로 다른 위치에 멈출 수 있고, 평평한 커널에서는 밀도가 더 높은 곳이 있어도 멈출 수 있습니다.</p><p class="faq-note">함수 \(p(\mathbf x)\)를 그리지 않고도 봉우리를 찾는 점이 핵심입니다(차원의 저주 회피).</p>`],
     ],
     watershed: [
       ['7행에서 이웃 번호가 “모두 같을 때만” 번호를 주는 이유는?', R`<p class="faq-key">서로 다른 유역의 물이 만나는 화소에는 번호를 주지 않아야, 그 화소가 경계(댐)로 남기 때문입니다.</p><p>이웃 번호가 1과 2로 섞인 화소에 아무 번호나 주면 두 유역이 그 화소를 통해 이어져 경계가 사라집니다. 그래서 끝까지 번호를 받지 못한 화소가 워터셰드가 되고, 결과는 항상 닫힌 경계가 됩니다(연습문제 6).</p>`],
