@@ -6158,32 +6158,98 @@ const SEG5UI = (() => {
       SEG5UI.flow(root, '5.4', { prev: 'k-means(5.2.2)는 k를 정해야 하고, 둥근 군집만 잘 찾고, 위치를 무시했습니다.', idea: '각 점이 스스로 <b>밀도가 높은 쪽으로 언덕을 오르게</b> 합니다. 군집 수는 자동, 모양 가정 없음(비모수적), 매개변수는 커널 폭 h 하나. 영상에서는 위치와 색을 함께 쓴 5차원 (y, x, L, u, v)에서 실행합니다.', next: '모든 화소가 수렴할 때까지 창 안 탐색을 반복해 느립니다. 에지 강도를 지형으로 보고 물을 채우는, 전혀 다른 비유 → 5.5 워터셰드.' });
       // (1) 1-D: Parzen estimate and one mean-shift path (Fig 5-13, 5-14)
       const X1 = [1.0, 1.4, 1.7, 2.0, 2.1, 2.3, 2.6, 3.4, 5.6, 6.0, 6.2, 6.3, 6.5, 6.7, 7.1, 8.4];
-      let h1 = 1.0, ker = 'flat', y0 = 4.2, frame = null;
+      let h1 = 1.0, ker = 'flat', y0 = 4.2, gridCount = 181, frame = null;
       const CODE = ['y_0 = x_i;   // 초기점 설정', 't = 0;', 'while(TRUE) {', '  식 (5.19)로 y_(t+1)을 계산한다.   // 커널 안 샘플의 가중 평균', '  if(||y_(t+1) − y_t|| ≤ ε) break;   // 수렴', '  t++;', '}', 'v_i = y_(t+1);   // x_i의 수렴점'];
       const st = UI.Stepper({ code: CODE, title: '알고리즘 5-6 (한 샘플의 모드 탐색)', render: fr => { frame = fr; draw1(); } });
-      const cv1 = h('canvas');
+      const overlapColor = '#7951bb';
+      const cv1 = h('canvas', { 'aria-label': '파젠 밀도 곡선과 민시프트 탐색 창' });
+      const densityWork = h('p', { class: 'caption' });
+      const shiftWork = h('p', { class: 'caption' });
+      const workBar = (color, background) => {
+        const fill = h('div', { style: { height: '100%', background } });
+        const bar = h('div', { 'aria-hidden': 'true', style: { height: '8px', overflow: 'hidden', borderRadius: '4px', background: color } }, fill);
+        return { bar, fill };
+      };
+      const densityBar = workBar('var(--rule)', 'var(--neg)');
+      const shiftBar = workBar('var(--rule)', 'var(--orange)');
+      const countFmt = new Intl.NumberFormat('ko-KR');
+      const weightsAt = y => X1.map(x => SEG.KER[ker]((x - y) ** 2 / (h1 * h1)));
+      let density;
+      function rebuildDensity() {
+        const xs = Array.from({ length: gridCount }, (_, i) => i * 9 / (gridCount - 1));
+        const values = xs.map(x => SEG.parzen1D(X1, x, h1, ker));
+        const checked = gridCount * X1.length;
+        const used = xs.reduce((n, x) => n + X1.filter(v => SEG.KER[ker](((x - v) / h1) ** 2) > 0).length, 0);
+        density = { data: xs.map((x, i) => [x, values[i]]), top: Math.max(...values) * 1.25 };
+        densityBar.fill.style.width = `${100 * used / checked}%`;
+        densityWork.textContent = `밀도 곡선: 격자점 ${gridCount}개 × 샘플 ${X1.length}개 = ${countFmt.format(checked)}회 검사 · 파랑 ${countFmt.format(used)}회는 밀도에 기여, 회색 ${countFmt.format(checked - used)}회는 창 밖`;
+      }
       function rebuild1() {
+        rebuildDensity();
         const path = SEG.meanShiftPath(X1.map(v => [v]), [y0], h1, ker, 1e-4).map(p => p[0]);
         const fr = [{ line: [1, 2], t: 0, y: path[0], vars: { y_0: +path[0].toFixed(4), h: h1 }, note: `y₀ = ${path[0].toFixed(3)}에서 출발합니다. 회색 띠가 커널(폭 h = ${h1}) — 이 안의 샘플만 계산에 참여합니다.` }];
+        let previousY, previousInside = [];
+        let scans = 0;
         for (let t = 0; t + 1 < path.length; t++) {
-          const yt = path[t], inside = X1.filter(x => SEG.KER[ker](((x - yt) / h1) ** 2) > 0), ws = inside.map(x => SEG.KER[ker](((x - yt) / h1) ** 2));
+          const yt = path[t], weights = weightsAt(yt);
+          const inside = X1.filter((_, i) => weights[i] > 0), ws = weights.filter(w => w > 0);
+          const work = { y: yt, previousY, inside, repeated: inside.filter(x => previousInside.includes(x)), scans: ++scans };
+          previousY = yt;
+          previousInside = inside;
           const done = Math.abs(path[t + 1] - yt) <= 1e-4;
-          fr.push({ line: [3, 4], t, y: yt, next: path[t + 1], inside, vars: { t, y_t: +yt.toFixed(4), '커널 안 샘플 수': inside.length, y_next: +path[t + 1].toFixed(4), 'm(y_t)': +(path[t + 1] - yt).toFixed(4) }, note: `커널 안 샘플 ${inside.map((x, i) => (ker === 'flat' ? x : `${x}×${ws[i].toFixed(2)}`)).join(', ')} → 가중 평균 y<sub>t+1</sub> = <b>${path[t + 1].toFixed(4)}</b>, 민시프트 m = ${(path[t + 1] - yt).toFixed(4)}` });
-          fr.push({ line: done ? 5 : [5, 6], t, y: path[t + 1], vars: { '|y_(t+1)−y_t|': +Math.abs(path[t + 1] - yt).toFixed(5), 수렴: done ? '예' : '아니오' }, note: done ? `이동량이 ε 이하 → <b>수렴</b>. 이 점은 모드 ${path[t + 1].toFixed(3)}에 속합니다.` : '아직 움직이는 중 → 반복' });
+          fr.push({ line: [3, 4], t, y: yt, next: path[t + 1], work, vars: { t, y_t: +yt.toFixed(4), '커널 안 샘플 수': inside.length, y_next: +path[t + 1].toFixed(4), 'm(y_t)': +(path[t + 1] - yt).toFixed(4) }, note: `커널 안 샘플 ${inside.map((x, i) => (ker === 'flat' ? x : `${x}×${ws[i].toFixed(2)}`)).join(', ')} → 가중 평균 y<sub>t+1</sub> = <b>${path[t + 1].toFixed(4)}</b>, 민시프트 m = ${(path[t + 1] - yt).toFixed(4)}` });
+          fr.push({ line: done ? 5 : [5, 6], t, y: path[t + 1], work, vars: { '|y_(t+1)−y_t|': +Math.abs(path[t + 1] - yt).toFixed(5), 수렴: done ? '예' : '아니오' }, note: done ? `이동량이 ε 이하 → <b>수렴</b>. 이 점은 모드 ${path[t + 1].toFixed(3)}에 속합니다.` : '아직 움직이는 중 → 반복' });
         }
-        fr.push({ line: 8, y: path[path.length - 1], vars: { v_i: +path[path.length - 1].toFixed(4), '반복 횟수': path.length - 1 }, note: path.length === 1 ? `커널(폭 h = ${h1}) 안에 샘플이 하나도 없어 움직일 수 없습니다. h를 키우거나 샘플 근처를 클릭하세요 — 샘플이 희소한 고차원에서 h가 중요한 이유입니다.` : `수렴점 v = ${path[path.length - 1].toFixed(3)}. 그래프를 클릭해 다른 출발점으로 해 보세요. 두 봉우리 사이 계곡에서 출발하면 <b>샘플이 더 많은 쪽</b>으로 갑니다.` });
+        const lastWork = fr[fr.length - 1].work || { y: path[0], inside: [], repeated: [], scans: 1 };
+        fr.push({ line: 8, y: path[path.length - 1], work: lastWork, vars: { v_i: +path[path.length - 1].toFixed(4), '반복 횟수': path.length - 1 }, note: path.length === 1 ? `커널(폭 h = ${h1}) 안에 샘플이 하나도 없어 움직일 수 없습니다. h를 키우거나 샘플 근처를 클릭하세요 — 샘플이 희소한 고차원에서 h가 중요한 이유입니다.` : `수렴점 v = ${path[path.length - 1].toFixed(3)}. 그래프를 클릭해 다른 출발점으로 해 보세요. 두 봉우리 사이 계곡에서 출발하면 <b>샘플이 더 많은 쪽</b>으로 갑니다.` });
         st.load(fr, 0);
       }
       function draw1() {
-        const xs = []; for (let x = 0; x <= 9.001; x += 0.05) xs.push(x);
-        const p = xs.map(x => SEG.parzen1D(X1, x, h1, ker)), top = Math.max(...p) * 1.25;
-        const P = UI.plot(cv1, { w: 560, h: 220, x: [0, 9], y: [0, top], series: [{ data: xs.map((x, i) => [x, p[i]]), color: '--neg', width: 2, fill: true }, { type: 'points', data: X1.map(x => [x, top * 0.04]), color: '--bad', r: 4 }], vlines: frame ? [{ x: frame.y, color: '--orange', label: 'y_t' }] : [], yfmt: v => v.toFixed(2) });
+        const { data, top } = density;
+        const work = frame?.work;
+        const y = frame?.y;
+        const P = UI.plot(cv1, { w: 560, h: 220, x: [0, 9], y: [0, top], series: [{ data, color: '--neg', width: 2, fill: true }, { type: 'points', data: X1.map(x => [x, top * 0.08]), color: '--bad', r: 4 }], vlines: frame ? [{ x: y, color: '--orange', label: 'y_t' }] : [], yfmt: v => v.toFixed(2) });
         const c = cv1.getContext('2d');
+        const left = P.m.l, right = P.W - P.m.r, bottom = P.H - P.m.b;
+        c.save();
+        c.beginPath(); c.rect(left, P.m.t, right - left, bottom - P.m.t); c.clip();
+        c.fillStyle = UI.col('--neg');
+        c.globalAlpha = 0.5;
+        for (const [x] of data) c.fillRect(P.X(x), bottom - 3, 1, 3);
+        c.globalAlpha = 1;
         if (frame) {
-          c.fillStyle = 'rgba(128,128,128,.15)'; c.fillRect(P.X(frame.y - h1), P.m.t, P.X(frame.y + h1) - P.X(frame.y - h1), P.H - P.m.t - P.m.b);
-          if (frame.inside) { c.fillStyle = UI.col('--orange'); for (const x of frame.inside) { c.beginPath(); c.arc(P.X(x), P.Y(top * 0.04), 5.5, 0, 7); c.fill(); } }
-          if (frame.next !== undefined) { c.strokeStyle = UI.col('--ok'); c.lineWidth = 3; const yy = P.Y(top * 0.85); c.beginPath(); c.moveTo(P.X(frame.y), yy); c.lineTo(P.X(frame.next), yy); c.stroke(); c.fillStyle = UI.col('--ok'); c.fillText('m(y_t)', P.X((frame.y + frame.next) / 2) - 16, yy - 6); }
+          c.fillStyle = 'rgba(128,128,128,.15)';
+          const windowY = work?.y ?? y;
+          c.fillRect(P.X(windowY - h1), P.m.t, P.X(windowY + h1) - P.X(windowY - h1), bottom - P.m.t);
+          if (work?.previousY !== undefined) {
+            const lo = Math.max(windowY, work.previousY) - h1, hi = Math.min(windowY, work.previousY) + h1;
+            if (hi > lo) {
+              c.fillStyle = 'rgba(121,81,187,.23)';
+              c.fillRect(P.X(lo), P.m.t, P.X(hi) - P.X(lo), bottom - P.m.t);
+            }
+          }
+          if (work) {
+            for (const x of work.inside) {
+              const reused = work.repeated.includes(x);
+              c.fillStyle = reused ? overlapColor : UI.col('--orange');
+              c.beginPath(); c.arc(P.X(x), P.Y(top * 0.08), 5.5, 0, 7); c.fill();
+            }
+          }
+          if (frame.next !== undefined) {
+            c.strokeStyle = UI.col('--ok'); c.lineWidth = 3;
+            const yy = P.Y(top * 0.85);
+            c.beginPath(); c.moveTo(P.X(y), yy); c.lineTo(P.X(frame.next), yy); c.stroke();
+            c.fillStyle = UI.col('--ok'); c.fillText('m(y_t)', P.X((y + frame.next) / 2) - 16, yy - 6);
+          }
         }
+        c.restore();
+        const used = work?.inside.length ?? 0, repeated = work?.repeated.length ?? 0;
+        const newPct = used ? 100 * (used - repeated) / used : 0;
+        shiftBar.fill.style.width = `${100 * used / X1.length}%`;
+        shiftBar.fill.style.background = `linear-gradient(to right, var(--orange) ${newPct}%, ${overlapColor} ${newPct}%)`;
+        shiftWork.textContent = work
+          ? `탐색 창 ${work.scans}번째 검사: ${X1.length}개 중 주황 ${used - repeated}개는 이번 창에 새로 포함, 보라 ${repeated}개는 직전 창에서도 사용, 회색 ${X1.length - used}개는 창 밖 · 누적 ${work.scans * X1.length}회 검사`
+          : '탐색을 시작하려면 알고리즘 5-6에서 다음 단계 또는 재생을 누르세요.';
       }
       cv1.addEventListener('pointerdown', e => { const r = cv1.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * 560; const v = (x - 44) / (560 - 56) * 9; if (v > 0 && v < 9) { y0 = +v.toFixed(2); rebuild1(); } });
       // (2) 2-D clustering (Algorithm 5-6, all samples)
@@ -6226,8 +6292,12 @@ const SEG5UI = (() => {
       root.append(h('div', { class: 'lab' },
         h('div', { class: 'stack' },
           h('div', { class: 'card' }, h('h3', {}, '① 1차원: 파젠 창과 모드 탐색', h('small', {}, '그림 5-13 · 5-14 · 그래프를 클릭해 출발점 바꾸기')),
-            h('div', { class: 'controls' }, UI.slider({ label: '대역폭 h', min: 0.3, max: 3, step: 0.1, value: h1, id: 'mshift-h', fmt: v => v.toFixed(1), oninput: v => { h1 = v; rebuild1(); } }), UI.segmented([['flat', '평편한 커널'], ['gauss', '가우시안 커널']], ker, v => { ker = v; rebuild1(); })),
-            h('div', { style: { marginTop: '8px' } }, cv1), h('p', { class: 'caption' }, '파란 곡선 = 식 (5.16)으로 추정한 p(x) (h가 크면 매끄럽고 작으면 거칢). 빨간 점 = 샘플, 주황 = 지금 커널 안의 샘플, 초록 화살표 = 민시프트 m(yₜ). 민시프트는 곡선을 그리지 않고도 봉우리로 올라갑니다.')),
+            h('div', { class: 'controls' }, UI.slider({ label: '대역폭 h', min: 0.3, max: 3, step: 0.1, value: h1, id: 'mshift-h', fmt: v => v.toFixed(1), oninput: v => { h1 = v; rebuild1(); } }), UI.segmented([['flat', '평평한 커널'], ['gauss', '가우시안 커널']], ker, v => { ker = v; rebuild1(); })),
+            h('div', { style: { marginTop: '8px' } }, cv1),
+            h('p', { class: 'caption' }, '파란 곡선은 파젠 밀도 p(x), 아래 눈금은 밀도를 계산한 격자점입니다. 회색 띠는 마지막으로 검사한 창, 보라색 띠는 직전 창과 겹치는 구간, 초록 선은 이동량입니다.'),
+            h('div', { class: 'controls' }, UI.slider({ label: '밀도 격자점 수', min: 31, max: 361, step: 30, value: gridCount, id: 'mshift-grid-count', oninput: v => { gridCount = v; rebuildDensity(); draw1(); } })),
+            densityWork, densityBar.bar, shiftWork, shiftBar.bar,
+            h('p', { class: 'caption' }, '이 데모의 밀도 추정은 격자점마다 모든 샘플을 검사합니다. 민시프트는 밀도 곡선 없이 현재 중심의 창을 반복해서 검사하며, 창이 겹치면 같은 샘플을 다시 평균에 사용합니다. 가우시안 커널에서는 같은 샘플도 중심과의 거리가 바뀌면 가중치가 달라집니다.')),
           h('div', { class: 'card' }, h('h3', {}, '② 2차원: 모든 샘플에서 출발 → 군집', h('small', {}, '알고리즘 5-6')), h('div', { class: 'controls' }, UI.slider({ label: 'h', min: 0.6, max: 3, step: 0.1, value: h2, id: 'mshift-h2', fmt: v => v.toFixed(1), oninput: v => { h2 = v; draw2(); } })), h('div', { class: 'row', style: { marginTop: '8px' } }, cv2, h('div', { class: 'col', style: { flex: '1 1 220px' } }, info2))),
           h('div', { class: 'card' }, h('h3', {}, '③ 영상: 5차원 (y, x, L, u, v)', h('small', {}, '알고리즘 5-7 · 5-8 · 그림 5-15')),
             h('div', { class: 'controls' }, pk.el, UI.slider({ label: 'h_s (위치)', min: 2, max: 12, step: 1, value: hs, id: 'mshift-hs', oninput: v => { hs = v; later(); } }), UI.slider({ label: 'h_r (색)', min: 3, max: 25, step: 1, value: hr, id: 'mshift-hr', oninput: v => { hr = v; later(); } }), UI.slider({ label: 'min_area', min: 0, max: 80, step: 5, value: minA, id: 'mshift-ma', oninput: v => { minA = v; later(); } }),
